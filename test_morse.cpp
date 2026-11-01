@@ -1,0 +1,113 @@
+// Self-check for keyer + decoder (no Qt): cl /std:c++17 /EHsc test_morse.cpp && test_morse
+#include "morse.h"
+#include <cstdio>
+
+static int fails = 0;
+#define CHECK(x) if (!(x)) { std::printf("FAIL line %d: %s\n", __LINE__, #x); ++fails; }
+
+// Runs the keyer; paddles are released at `releaseAt`. Returns the elements keyed.
+static std::string keyed(Keyer k, int samples, int releaseAt, int *firstToneLen = nullptr) {
+    std::string out;
+    bool was = false;
+    int len = 0;
+    for (int i = 0; i < samples; ++i) {
+        if (i == releaseAt) k.ditIn = k.dahIn = false;
+        const bool on = k.step();
+        if (on && !was) out += k.sym;
+        if (on && out.size() == 1) ++len;
+        was = on;
+    }
+    if (firstToneLen) *firstToneLen = len;
+    return out;
+}
+
+int main() {
+    Keyer k;
+    k.dit = 10;
+    k.ditIn = true;
+    int len = 0;
+    CHECK(keyed(k, 100, 1000, &len) == ".....");  // held dit paddle: dit + gap = 20 samples each
+    CHECK(len == 10);
+
+    k.ditIn = false; k.dahIn = true;
+    CHECK(keyed(k, 80, 1000, &len) == "--");
+    CHECK(len == 30);
+
+    k.ditIn = k.dahIn = true;  // short squeeze
+    CHECK(keyed(k, 200, 5) == ".-");             // mode B: remembered dah
+    k.mode = Keyer::IambicA;
+    CHECK(keyed(k, 200, 5) == ".");
+    CHECK(keyed(k, 200, 85) == ".-.-");          // held squeeze alternates
+
+    Decoder d;
+    d.ditMs = 60;
+    d.spaceMs = 300;
+    d.element(60, '.'); d.element(180, '-');
+    CHECK(d.gap(100) == 0);                      // still inside the character
+    CHECK(d.gap(200) == 'A');
+    d.gap(400);
+    d.element(50, 0); d.element(200, 0); d.element(40, 0);  // straight key, classified by length
+    CHECK(d.gap(200) == 'R');
+    CHECK(d.text == "A R");
+    CHECK(patternOf('Q') == "--.-");
+
+    const Timing t = farnsworth(20, 20);
+    CHECK(t.ditMs == 60 && t.charGapMs == 180);
+    const Timing f = farnsworth(18, 10);              // Farnsworth stretches only the spacing
+    CHECK(std::lround(f.charGapMs) == 621 && std::lround(f.ditMs) == 67);
+
+    const auto S = Keyer::Straight, B = Keyer::IambicB;
+    Verdict v = judge(".-", ".-", {60, 180}, {60}, 180, -1, S, false, t);
+    CHECK(v.score == 100 && v.habits == 0 && v.worst == 0);
+    v = judge(".-", ".-", {90, 180}, {60}, 180, -1, S, false, t);    // dit 1.4x my own dit
+    CHECK(v.score == 94 && v.worst == DitLong);
+    v = judge(".-", ".-", {70, 200}, {66}, 200, -1, S, false, t);    // ordinary hand variation: full marks
+    CHECK(v.score == 100 && v.habits == 0);
+    v = judge(".-", ".-", {60, 180}, {60}, 180, -1, S, true, t);     // hint caps the score
+    CHECK(v.score == 80 && v.worst == HintUsed);
+    v = judge(".-", ".-", {60, 180}, {60}, -1, 30, B, false, t);     // iambic: released within the gap's first half
+    CHECK(v.score == 100 && v.habits == 0);
+    v = judge(".-", ".-", {60, 180}, {60}, -1, 60, B, false, t);     // a whole dit late: about to send an extra element
+    CHECK(v.score == 67 && v.worst == LateRelease);
+    v = judge(".-", ".-", {60, 180}, {120}, -1, -5, B, false, t);    // a dit of hesitation before the dah
+    CHECK(v.score == 33 && v.worst == ElemHesitate);
+    v = judge(".-", ".-", {60, 180}, {60}, 400, -5, B, false, t);    // hesitation before the char
+    CHECK(v.score == 71 && v.worst == GapLong);
+    v = judge(".-", ".-", {60, 180}, {60}, 90, -5, B, false, t);     // half the gap: letters run together
+    CHECK(v.score == 71 && v.worst == GapShort && v.notes.size() == 1);
+    v = judge(".-", ".-", {67, 200}, {67}, 350, -5, B, false, f);    // Farnsworth: between 3 dits (200) and 621 is fine
+    CHECK(v.score == 100 && v.habits == 0);
+    v = judge(".-", ".-", {67, 200}, {67}, 120, -5, B, false, f);    // below 3 dits: letters run together
+    CHECK(v.worst == GapShort && v.score < 85);
+    Criteria lax;
+    lax.shortZero = 100;
+    CHECK(judge(".-", ".-", {60, 180}, {60}, 90, -5, B, false, t, lax).score > 71);  // criteria are honoured
+    v = judge(".-", ".", {}, {}, -1, -1, B, false, t);               // dah never sent
+    CHECK(v.score == 0 && v.worst == MissingElem);
+    v = judge(".-", ".-.", {}, {}, -1, -1, B, false, t);             // A -> R: Mode B latched the dit paddle
+    CHECK(v.worst == SqueezeLate);
+    v = judge("..", "...", {}, {}, -1, -1, B, false, t);             // dit paddle simply held too long
+    CHECK(v.worst == ExtraElem);
+
+    // exam: two sentences, 12 letters required; one substitution, one dropped letter, one extra letter
+    auto ex = [](const std::string &s, int score = 100) {
+        std::vector<ExamChar> out;
+        for (char ch : s) out.push_back({ch, score, 0});
+        return out;
+    };
+    const std::vector<std::string> text = {"THE SUN", "IS UP"};
+    ExamGrade eg = gradeExam(text, ex("THESUNISUP"), 0, 10, 2, 5, Criteria{});
+    CHECK(eg.score == 100 && eg.end == 10 && eg.sentences[1].sent == "IS UP" && eg.letters[9].ok);
+    eg = gradeExam(text, ex("TXESNISUUP"), 1, 10, 2, 5, Criteria{});     // X for H, U dropped, extra U
+    CHECK(eg.sub == 1 && eg.del == 1 && eg.ins == 1 && eg.corr == 1);
+    CHECK(eg.score == 100 - 2 * 3 - 1);
+    CHECK(eg.sentences[0].sub == 1 && eg.sentences[0].del == 1 && eg.sentences[1].ins == 1);
+    eg = gradeExam(text, ex("THESU", 40), 0, 10, 1, 5, Criteria{});       // stopped early, sloppy rhythm
+    CHECK(eg.end == 5 && eg.unclear == 5 && eg.shortfall == 5 && !eg.sentences[1].reached && !eg.letters[5].reached);
+    CHECK(eg.score == 100 - 5 - 2 * 5);
+    eg = gradeExam(text, ex("THESUNISUP"), 0, 10, 1, 5, Criteria{});      // 10 letters in 1 min against 5/min
+    CHECK(eg.over && eg.score == 95);
+
+    std::printf(fails ? "%d failed\n" : "ok\n", fails);
+    return fails != 0;
+}
