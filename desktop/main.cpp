@@ -150,7 +150,7 @@ private:
 // Scrolling view of raw paddle contacts and the keyed tone.
 class Timeline : public QWidget {
 public:
-    struct Bar { double t0, t1; QString label; };  // t1 < 0 while held
+    struct Bar { double t0, t1; QString label; bool stray = false; };  // t1 < 0 while held; stray = pressed, never sounded
     QVector<Bar> lanes[3];
     QVector<QPair<double, QString>> marks;          // decoded chars under the tone lane
     double now = 0, liveTone = -1, ditMs = 80, windowMs = 4000;
@@ -190,14 +190,15 @@ protected:
             p.setPen(QColor(150, 155, 170));
             p.drawText(QRectF(10, y, left - 14, laneH), Qt::AlignVCenter, names[i]);
             f.setPointSize(8); p.setFont(f);
-            auto draw = [&](double t0, double t1, const QString &label) {
+            auto draw = [&](double t0, double t1, const QString &label, bool stray) {
                 QRectF r(QPointF(qMax(left, X(t0)), y + 6), QPointF(X(t1), y + laneH - 6));
                 if (r.width() <= 0) return;
-                p.fillRect(r, colors[i]);
-                if (r.width() > 34) { p.setPen(Qt::black); p.drawText(r, Qt::AlignCenter, label); }
+                p.fillRect(r, stray ? QColor(255, 70, 80) : colors[i]);
+                if (stray) { p.setPen(QColor(255, 120, 120)); p.drawText(QRectF(r.right() + 3, r.top(), 60, r.height()), Qt::AlignLeft | Qt::AlignVCenter, "헛누름"); }
+                else if (r.width() > 34) { p.setPen(Qt::black); p.drawText(r, Qt::AlignCenter, label); }
             };
-            for (auto &b : lanes[i]) draw(b.t0, b.t1 < 0 ? now : b.t1, b.label);
-            if (i == 2 && liveTone >= 0) draw(liveTone, now, {});
+            for (auto &b : lanes[i]) draw(b.t0, b.t1 < 0 ? now : b.t1, b.label, b.stray);
+            if (i == 2 && liveTone >= 0) draw(liveTone, now, {}, false);
         }
         f.setPointSize(16); f.setBold(true); p.setFont(f);
         p.setPen(Qt::white);
@@ -591,7 +592,7 @@ protected:
         p.drawText(QRect(20, y, W - 40, 24), Qt::AlignVCenter, QString("자주 나오는 버릇 (%1, 시도 대비 비율)").arg(period));
         y += 30;
         QVector<QPair<double, unsigned>> hs;
-        for (unsigned h = 1; h <= SqueezeLate; h <<= 1) {
+        for (unsigned h = 1; h <= StrayPress; h <<= 1) {
             const Agg a = agg(0, days, 0, h);
             if (a.sum > 0) hs.push_back({a.sum / a.n, h});
         }
@@ -834,11 +835,16 @@ public:
         auto *fixTitle = new QLabel("지적 사항  (최근이 위)");
         fixTitle->setStyleSheet("color:#8fb4ff; font-weight:bold");
         fixList->setWordWrap(true);
+        fixList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         fixList->setFocusPolicy(Qt::NoFocus);
         fixList->setSelectionMode(QAbstractItemView::NoSelection);
         fixList->setStyleSheet("QListWidget { background:#141626; border:1px solid #2a2f50; border-radius:6px; font-size:11pt; }"
                                "QListWidget::item { padding:2px 4px; }");
+        alertLabel->setWordWrap(true);
+        alertLabel->setStyleSheet("background:#5a2a10; color:#ffd2a8; border:1px solid #ff9640; border-radius:6px; padding:6px; font-size:11pt;");
+        alertLabel->hide();
         fixBox->addWidget(fixTitle);
+        fixBox->addWidget(alertLabel);
         fixBox->addWidget(fixList);
         auto *fixPanel = new QWidget;
         fixPanel->setLayout(fixBox);
@@ -929,6 +935,7 @@ public:
         startAudio();
         apply();
         newWord();
+        updateAlert();
         auto *timer = new QTimer(this);
         timer->setTimerType(Qt::PreciseTimer);
         connect(timer, &QTimer::timeout, this, &App::tick);
@@ -977,6 +984,7 @@ private:
     double allUpAt = -1;       // when both paddles were last released, -1 while one is held
     double prevCharEnd = -1;   // end of the previous correct character in this word
     int owe = 0;               // correct repeats still needed for the current letter (1 per miss, up to crit.maxRepeat)
+    int ditStrays = 0, dahStrays = 0;  // silent paddle presses since the last judged character
     Criteria crit;             // scoring rules, edited in the settings dialog
     QVector<Rec> recs;
     QTabWidget *tabs = new QTabWidget;
@@ -986,6 +994,7 @@ private:
     QComboBox *periodBox = new QComboBox;
     QLabel *status = new QLabel;
     QListWidget *fixList = new QListWidget;  // feedback per judged character, newest on top
+    QLabel *alertLabel = new QLabel;          // repeated bad habit warning above the list (hidden when none)
     QComboBox *mode = new QComboBox;
     QSpinBox *wpm = new QSpinBox, *eff = new QSpinBox, *freq = new QSpinBox, *level = new QSpinBox, *span = new QSpinBox;
     QSlider *vol = new QSlider(Qt::Horizontal);
@@ -1075,6 +1084,8 @@ private:
             {"levelCount", "다음 글자 추가: 최근 시도", &Criteria::levelCount, 5, 100, 5, " 회", "글자마다 최근 몇 번의 평균을 볼지"},
             {"hintFactor", "힌트 사용 시 점수", &Criteria::hintFactor, 0, 100, 5, " %", ""},
             {"gapWeight", "간격 항목 가중치", &Criteria::gapWeight, 1, 5, .5, " 배", "Pierpont: 간격이 리듬의 핵심 — 간격 항목을 다른 항목의 몇 배로 셀지"},
+            {"alertWindow", "습관 알림: 최근 몇 회를 볼지", &Criteria::alertWindow, 3, 50, 1, " 회", "같은 습관이 반복되면 지적 사항 위에 경고를 띄웁니다"},
+            {"alertCount", "습관 알림: 몇 회 이상이면 경고", &Criteria::alertCount, 2, 50, 1, " 회", "위 횟수 중 같은 습관이 이만큼 나오면 경고"},
             {nullptr, "글자 간격 (dit 3개 ~ Farnsworth 사이면 만점)", nullptr, 0, 0, 0, "", ""},
             {"shortOk", "짧음: 만점 한계", &Criteria::shortOk, 0, 100, 5, " %", "표준 간격(dit 3개)보다 짧을 때. 글자가 붙으면 다른 글자로 들림 — 엄격하게"},
             {"shortZero", "짧음: 0점", &Criteria::shortZero, 5, 100, 5, " %", ""},
@@ -1200,6 +1211,7 @@ private:
         sanitize(crit);
         saveSettings();
         owe = qMin(owe, int(crit.maxRepeat));
+        updateAlert();
         game->update();
     }
 
@@ -1312,11 +1324,19 @@ private:
         const double now = ms();
         QVector<Elem> els;
         double live;
+        int sd = 0, sh = 0;
         {
             QMutexLocker l(&tone.mx);
             els.swap(tone.done);
             live = tone.liveStart;
+            std::swap(sd, tone.keyer.ditStrays);
+            std::swap(sh, tone.keyer.dahStrays);
         }
+        ditStrays += sd;
+        dahStrays += sh;
+        for (int lane = 0; lane < 2; ++lane)  // the latest released bar of that paddle is the silent one
+            for (int k = lane ? sh : sd, i = timeline->lanes[lane].size() - 1; k > 0 && i >= 0; --i)
+                if (auto &b = timeline->lanes[lane][i]; b.t1 >= 0 && !b.stray) { b.stray = true; --k; }
         for (auto &e : els) {
             dec.element(e.ms, e.sym);
             cur.push_back(e);
@@ -1406,6 +1426,7 @@ private:
 
     // A character decoded during the exam: rhythm-judge it as sent, or treat 6+ dits as the correction sign.
     void examChar(const std::string &sent, char c) {
+        ditStrays = dahStrays = 0;  // ponytail: the exam sheet has no item for silent presses; practice catches them
         if (!examView->running) { cur.clear(); return; }
         if (sent.size() >= 6 && sent.find('-') == std::string::npos) {  // ........ = error, erase the last letter
             if (!examSent.empty()) examSent.pop_back();
@@ -1484,6 +1505,18 @@ private:
         fixList->scrollToTop();
     }
 
+    // Repeated bad habit over the last practice attempts -> banner above the findings list.
+    void updateAlert() {
+        std::vector<unsigned> recent;
+        for (int i = recs.size() - 1; i >= 0 && int(recent.size()) < crit.alertWindow; --i)
+            if (recs[i].kind == 0) recent.insert(recent.begin(), recs[i].habits);
+        int n = 0;
+        const unsigned h = repeatedHabit(recent, crit, &n);
+        alertLabel->setVisible(h != 0);
+        if (h) alertLabel->setText(QString("⚠ <b>반복되는 습관: %1</b> — 최근 %2회 중 %3회<br>→ %4")
+                                       .arg(habitName(h)).arg(recent.size()).arg(n).arg(habitAdvice(h)));
+    }
+
     void judge(const std::string &sent) {
         const char want = target();
         if (!want) { cur.clear(); return; }  // keyed during the word-clear pause
@@ -1497,11 +1530,15 @@ private:
         const double charGap = prevCharEnd >= 0 ? cur[0].t0 - prevCharEnd : -1;
         // ponytail: release compared with the tone's render time; the ~20 ms audio buffer is not subtracted
         const double releaseLate = allUpAt >= 0 ? allUpAt - cur.last().t1 : NAN;
-        const Verdict v = ::judge(ref, sent, on, gaps, charGap, releaseLate, Keyer::Mode(mode->currentIndex()), hint->isChecked(), timing, crit);
+        Verdict v = ::judge(ref, sent, on, gaps, charGap, releaseLate, Keyer::Mode(mode->currentIndex()), hint->isChecked(), timing, crit);
+        markStrays(v, ditStrays, dahStrays);
+        const bool stray = v.habits & StrayPress;
+        ditStrays = dahStrays = 0;
 
         game->releaseAt = straight ? -1 : allUpAt;
         game->charGap = charGap;
         saveRec({QDateTime::currentSecsSinceEpoch(), want, sent == ref, v.score, mode->currentIndex(), wpm->value(), eff->value(), v.habits});
+        updateAlert();
 
         last = cur;
         lastRef = ref;
@@ -1521,9 +1558,15 @@ private:
         prevCharEnd = last.last().t1;
         const QColor c = gradeColor(v.score);
         ++game->hits;
-        game->combo = v.score >= 70 ? game->combo + 1 : 0;  // sloppy keying breaks the combo too
+        game->combo = v.score >= 70 && !stray ? game->combo + 1 : 0;  // sloppy keying breaks the combo too
         game->bestCombo = qMax(game->bestCombo, game->combo);
         game->score += qRound(v.score * (1 + game->combo / 10.0));
+        if (stray) {  // right letter, but a paddle was pressed that never sounded: the hand motion failed
+            owe = qMin(owe + 1, int(crit.maxRepeat));
+            game->owe = owe;
+            report(want, QString("헛누름  ·  소리 안 난 패들 누름  ·  ↻ 같은 글자 %1회 더").arg(owe), QColor(255, 80, 90), v);
+            return;
+        }
         if (v.score < crit.passScore) {  // right letter, rhythm under the pass mark: counts as a miss too
             owe = qMin(owe + 1, int(crit.maxRepeat));
             game->owe = owe;

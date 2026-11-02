@@ -17,11 +17,17 @@ final class Morse {
         int dit = 3840;                 // samples per dit = rate * 1.2 / wpm
         boolean ditIn, dahIn;
         char sym;                       // element being sent: '.', '-' or 0 (idle / straight key)
+        // Silent presses: a paddle pressed and released without the keyer ever sending its element
+        int ditStrays, dahStrays;
         private int n;
-        private boolean ditMem, dahMem;
+        private boolean ditMem, dahMem, ditWas, dahWas, ditPending, dahPending;
 
         boolean step() {
             if (mode == STRAIGHT) return ditIn || dahIn;
+            ditPending |= ditIn && !ditWas;  // a new press owes an element
+            dahPending |= dahIn && !dahWas;
+            ditWas = ditIn;
+            dahWas = dahIn;
             if (n > 0) {
                 if (mode == IAMBIC_B) {  // remember the opposite paddle -> it still gets sent after release
                     dahMem |= sym == '.' && dahIn;
@@ -33,6 +39,11 @@ final class Morse {
                             : sym == '-' ? (ditMem || ditIn ? '.' : dahIn ? '-' : 0)
                             : (ditIn ? '.' : dahIn ? '-' : 0);
             ditMem = dahMem = false;
+            // the element a press owed is sent now -> paid; released before it could be sent -> silent press
+            if (next == '.') ditPending = false;
+            if (next == '-') dahPending = false;
+            if (ditPending && !ditIn) { ditPending = false; ++ditStrays; }
+            if (dahPending && !dahIn) { dahPending = false; ++dahStrays; }
             sym = next;
             n = next == '.' ? 2 * dit : next == '-' ? 4 * dit : 0;
             return n > dit;
@@ -41,7 +52,8 @@ final class Morse {
         Keyer copy() {
             Keyer k = new Keyer();
             k.mode = mode; k.dit = dit; k.ditIn = ditIn; k.dahIn = dahIn; k.sym = sym;
-            k.n = n; k.ditMem = ditMem; k.dahMem = dahMem;
+            k.n = n; k.ditMem = ditMem; k.dahMem = dahMem; k.ditWas = ditWas; k.dahWas = dahWas;
+            k.ditPending = ditPending; k.dahPending = dahPending; k.ditStrays = ditStrays; k.dahStrays = dahStrays;
             return k;
         }
     }
@@ -76,7 +88,7 @@ final class Morse {
     // Bad habits detected per attempt (bit flags, stored in the attempt log).
     static final int WRONG_CHAR = 1, EXTRA_ELEM = 2, MISSING_ELEM = 4, LATE_RELEASE = 8, GAP_SHORT = 16, GAP_LONG = 32,
             DIT_LONG = 64, DIT_SHORT = 128, DAH_LONG = 256, DAH_SHORT = 512, ELEM_GAP_OFF = 1024, HINT_USED = 2048,
-            ELEM_HESITATE = 4096, SPEED_OFF = 8192, SQUEEZE_LATE = 16384;
+            ELEM_HESITATE = 4096, SPEED_OFF = 8192, SQUEEZE_LATE = 16384, STRAY_PRESS = 32768;
 
     static String habitName(int h) {
         switch (h) {
@@ -95,6 +107,7 @@ final class Morse {
         case ELEM_HESITATE: return "요소 사이에서 머뭇거림";
         case SPEED_OFF: return "속도가 기준과 다름";
         case SQUEEZE_LATE: return "스퀴즈 후 반대쪽 패들을 늦게 뗌";
+        case STRAY_PRESS: return "소리 안 난 패들 누름 (헛손질)";
         }
         return "";
     }
@@ -116,6 +129,7 @@ final class Morse {
         case ELEM_HESITATE: return "요소 사이는 dit 하나를 넘기지 마세요. 손가락을 양쪽 패들에 항상 대고 있으세요.";
         case SPEED_OFF: return "기준 소리(▶ 글자)를 듣고 그 빠르기에 손을 맞추세요.";
         case SQUEEZE_LATE: return "마지막 요소가 시작되면 그 절반 전에 반대쪽 패들을 떼세요 (예: A가 R로 나가면 dit 패들을 더 빨리).";
+        case STRAY_PRESS: return "필요한 패들만 누르세요. 다음 패들은 지금 요소가 끝날 때까지 누른 채로 두고, 툭 건드렸다 떼지 마세요.";
         }
         return "";
     }
@@ -131,6 +145,7 @@ final class Morse {
         public double releaseOk = 50, releaseZero = 100;
         public double shortOk = 25, shortZero = 60;
         public double longOk = 50, longZero = 150;
+        public double alertWindow = 10, alertCount = 4;  // warn when one habit shows up alertCount times in the last alertWindow tries
         public double examPass = 60;
         public double examErr = 2, examUnclear = 1, examCorr = 1, examShort = 2, examOver = 5;
         public double examUnclearBelow = 60;
@@ -251,6 +266,30 @@ final class Morse {
         }
         v.score = (int) lround(100 * mean);
         return v;
+    }
+
+    // Silent presses made while keying this character: the letter may be right, but the hand motion failed.
+    static void markStrays(Verdict v, int ditStrays, int dahStrays) {
+        if (ditStrays + dahStrays == 0) return;
+        v.habits |= STRAY_PRESS;
+        if ((v.habits & WRONG_CHAR) == 0) v.worst = STRAY_PRESS;
+        v.notes.add(0, habitName(STRAY_PRESS) + " — dit 패들 " + ditStrays + "회, dah 패들 " + dahStrays + "회 (소리는 안 났지만 손동작 실패)");
+    }
+
+    // The habit that keeps coming back: most frequent in the last alertWindow attempts (newest last), if it showed up
+    // at least alertCount times; 0 = nothing repeating. Specific habits win ties over "wrong letter"; the hint is ignored.
+    static int repeatedHabit(List<Integer> recent, Criteria c, int[] count) {
+        final int from = recent.size() - Math.min(recent.size(), (int) Math.max(1, c.alertWindow));
+        int best = 0, bestN = 0;
+        for (int h = STRAY_PRESS; h >= WRONG_CHAR; h >>= 1) {
+            if (h == HINT_USED) continue;
+            int k = 0;
+            for (int i = from; i < recent.size(); ++i) if ((recent.get(i) & h) != 0) ++k;
+            if (k > bestN) { best = h; bestN = k; }
+        }
+        if (bestN < c.alertCount) return 0;
+        if (count != null) count[0] = bestN;
+        return best;
     }
 
     // ---- Exam grading ----

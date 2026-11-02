@@ -13,9 +13,16 @@ struct Keyer {
     int dit = 3840;                 // samples per dit = rate * 1.2 / wpm
     bool ditIn = false, dahIn = false;
     char sym = 0;                   // element being sent: '.', '-' or 0 (idle / straight key)
+    // Silent presses: a paddle pressed and released without the keyer ever sending its element
+    // (e.g. Mode A tap of the other paddle mid-element). Nothing is heard, but the hand motion failed.
+    int ditStrays = 0, dahStrays = 0;
 
     bool step() {
         if (mode == Straight) return ditIn || dahIn;
+        ditPending |= ditIn && !ditWas;  // a new press owes an element
+        dahPending |= dahIn && !dahWas;
+        ditWas = ditIn;
+        dahWas = dahIn;
         if (n > 0) {
             if (mode == IambicB) {  // remember the opposite paddle -> it still gets sent after release
                 dahMem |= sym == '.' && dahIn;
@@ -27,6 +34,11 @@ struct Keyer {
                         : sym == '-' ? (ditMem || ditIn ? '.' : dahIn ? '-' : 0)
                         : (ditIn ? '.' : dahIn ? '-' : 0);
         ditMem = dahMem = false;
+        // the element a press owed is sent now -> paid; released before it could be sent -> silent press
+        if (next == '.') ditPending = false;
+        if (next == '-') dahPending = false;
+        if (ditPending && !ditIn) { ditPending = false; ++ditStrays; }
+        if (dahPending && !dahIn) { dahPending = false; ++dahStrays; }
         sym = next;
         n = next == '.' ? 2 * dit : next == '-' ? 4 * dit : 0;
         return n > dit;
@@ -35,6 +47,7 @@ struct Keyer {
 private:
     int n = 0;
     bool ditMem = false, dahMem = false;
+    bool ditWas = false, dahWas = false, ditPending = false, dahPending = false;
 };
 
 inline const std::map<std::string, char> &morseTable() {
@@ -70,7 +83,7 @@ inline Timing farnsworth(double charWpm, double effWpm) {
 enum Habit : unsigned {
     WrongChar = 1, ExtraElem = 2, MissingElem = 4, LateRelease = 8, GapShort = 16, GapLong = 32,
     DitLong = 64, DitShort = 128, DahLong = 256, DahShort = 512, ElemGapOff = 1024, HintUsed = 2048,
-    ElemHesitate = 4096, SpeedOff = 8192, SqueezeLate = 16384,
+    ElemHesitate = 4096, SpeedOff = 8192, SqueezeLate = 16384, StrayPress = 32768,
 };
 inline const char *habitName(unsigned h) {
     switch (h) {
@@ -89,6 +102,7 @@ inline const char *habitName(unsigned h) {
     case ElemHesitate: return "요소 사이에서 머뭇거림";
     case SpeedOff: return "속도가 기준과 다름";
     case SqueezeLate: return "스퀴즈 후 반대쪽 패들을 늦게 뗌";
+    case StrayPress: return "소리 안 난 패들 누름 (헛손질)";
     }
     return "";
 }
@@ -111,6 +125,7 @@ inline const char *habitAdvice(unsigned h) {
     case ElemHesitate: return "요소 사이는 dit 하나를 넘기지 마세요. 손가락을 양쪽 패들에 항상 대고 있으세요.";
     case SpeedOff: return "기준 소리(Space)를 듣고 그 빠르기에 손을 맞추세요.";
     case SqueezeLate: return "마지막 요소가 시작되면 그 절반 전에 반대쪽 패들을 떼세요 (예: A가 R로 나가면 dit 패들을 더 빨리).";
+    case StrayPress: return "필요한 패들만 누르세요. 다음 패들은 지금 요소가 끝날 때까지 누른 채로 두고, 툭 건드렸다 떼지 마세요.";
     }
     return "";
 }
@@ -127,6 +142,7 @@ struct Criteria {
     double releaseOk = 50, releaseZero = 100;    // iambic: release after the last tone, % of a dit
     double shortOk = 25, shortZero = 60;         // character gap too short (letters run together)
     double longOk = 50, longZero = 150;          // character gap too long (hesitation)
+    double alertWindow = 10, alertCount = 4;     // warn when one habit shows up alertCount times in the last alertWindow tries
     // Exam, after the old Korean amateur telegraphy practical (plain English, N chars/min for 3 min) and its
     // sending score sheet: 오자·탈자·용자 / 자호불명료 / 정정 / 기준속도미달 / 표준속도초과. The sheet's point values
     // were never published, so these deductions are defaults to tune.
@@ -245,6 +261,34 @@ inline Verdict judge(const std::string &want, const std::string &got, const std:
     }
     v.score = int(std::lround(100 * mean));
     return v;
+}
+
+// Silent presses made while keying this character: the letter may be right, but the hand motion failed.
+// The app treats a flagged letter as failed (repeat it). Put first because it explains the attempt.
+inline void markStrays(Verdict &v, int ditStrays, int dahStrays) {
+    if (ditStrays + dahStrays == 0) return;
+    v.habits |= StrayPress;
+    if (!(v.habits & WrongChar)) v.worst = StrayPress;
+    v.notes.insert(v.notes.begin(), std::string(habitName(StrayPress)) + " — dit 패들 " + std::to_string(ditStrays) +
+                                        "회, dah 패들 " + std::to_string(dahStrays) + "회 (소리는 안 났지만 손동작 실패)");
+}
+
+// The habit that keeps coming back: most frequent in the last alertWindow attempts (habit flags, newest last),
+// if it showed up at least alertCount times; 0 = nothing repeating. Specific habits win ties over "wrong letter";
+// using the hint is a choice, not a habit.
+inline unsigned repeatedHabit(const std::vector<unsigned> &recent, const Criteria &c, int *count = nullptr) {
+    const size_t from = recent.size() - std::min(recent.size(), size_t(std::max(1.0, c.alertWindow)));
+    unsigned best = 0;
+    int bestN = 0;
+    for (unsigned h = StrayPress; h >= WrongChar; h >>= 1) {
+        if (h == HintUsed) continue;
+        int k = 0;
+        for (size_t i = from; i < recent.size(); ++i) k += (recent[i] & h) != 0;
+        if (k > bestN) { best = h; bestN = k; }
+    }
+    if (bestN < c.alertCount) return 0;
+    if (count) *count = bestN;
+    return best;
 }
 
 // ---- Exam grading ---------------------------------------------------------------------------------------

@@ -39,6 +39,45 @@ int main() {
     CHECK(keyed(k, 200, 5) == ".");
     CHECK(keyed(k, 200, 85) == ".-.-");          // held squeeze alternates
 
+    // silent presses: a paddle pressed and released without its element ever being sent
+    auto strays = [](Keyer::Mode mode, auto dit, auto dah) {
+        Keyer s;
+        s.dit = 10;
+        s.mode = mode;
+        std::string out;
+        bool was = false;
+        for (int i = 0; i < 200; ++i) {
+            s.ditIn = dit(i);
+            s.dahIn = dah(i);
+            const bool on = s.step();
+            if (on && !was) out += s.sym;
+            was = on;
+        }
+        return out + "|" + std::to_string(s.ditStrays) + std::to_string(s.dahStrays);
+    };
+    auto during = [](int a, int b) { return [=](int i) { return i >= a && i < b; }; };
+    auto never = [](int) { return false; };
+    CHECK(strays(Keyer::IambicA, during(0, 5), during(2, 8)) == ".|01");   // Mode A: dah tapped mid-dit, never sent
+    CHECK(strays(Keyer::IambicB, during(0, 5), during(2, 8)) == ".-|00");  // Mode B: the tap is remembered and sent
+    CHECK(strays(Keyer::IambicB, during(0, 3), never) == ".|00");          // a plain dit
+    CHECK(strays(Keyer::IambicB, [](int i) { return i < 3 || (i >= 6 && i < 9); }, never) == ".|10");  // dit re-tapped mid-dit
+    CHECK(strays(Keyer::IambicB, during(0, 25), never) == "..|00");        // held dit: two dits, nothing silent
+    Verdict sv = judge(".-", ".-", {60, 180}, {60}, -1, -5, Keyer::IambicB, false, farnsworth(20, 20));
+    markStrays(sv, 0, 1);
+    CHECK((sv.habits & StrayPress) && sv.worst == StrayPress && sv.notes.size() == 1 && sv.score == 100);
+
+    // repeated habit alert: 4 of the last 10
+    Criteria ac;
+    int cnt = 0;
+    std::vector<unsigned> hist = {GapShort, GapShort, GapShort, GapShort, GapShort, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    CHECK(repeatedHabit(hist, ac) == 0);                          // old ones scrolled out of the window
+    hist = {0, GapShort, WrongChar | MissingElem, GapShort, 0, GapShort | HintUsed, WrongChar | MissingElem, GapShort, 0, 0};
+    CHECK(repeatedHabit(hist, ac, &cnt) == GapShort && cnt == 4);
+    hist = {WrongChar | MissingElem, WrongChar | MissingElem, WrongChar | MissingElem, WrongChar | MissingElem};
+    CHECK(repeatedHabit(hist, ac) == MissingElem);                 // the specific reason, not just "wrong"
+    CHECK(repeatedHabit({HintUsed, HintUsed, HintUsed, HintUsed}, ac) == 0);
+    CHECK(repeatedHabit({}, ac) == 0);
+
     Decoder d;
     d.ditMs = 60;
     d.spaceMs = 300;

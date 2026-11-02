@@ -28,6 +28,21 @@ public class MorseTest {
         return out.toString();
     }
     static double[] d(double... x) { return x; }
+    static String strays(int mode, int ditFrom, int ditTo, int dahFrom, int dahTo) {
+        Keyer s = new Keyer();
+        s.dit = 10;
+        s.mode = mode;
+        StringBuilder out = new StringBuilder();
+        boolean was = false;
+        for (int i = 0; i < 200; ++i) {
+            s.ditIn = i >= ditFrom && i < ditTo;
+            s.dahIn = i >= dahFrom && i < dahTo;
+            final boolean on = s.step();
+            if (on && !was) out.append(s.sym);
+            was = on;
+        }
+        return out + "|" + s.ditStrays + s.dahStrays;
+    }
     static List<ExamChar> ex(String s, int score) {
         List<ExamChar> out = new ArrayList<>();
         for (char ch : s.toCharArray()) out.add(new ExamChar(ch, score, 0));
@@ -46,6 +61,32 @@ public class MorseTest {
         k.mode = Keyer.IAMBIC_A;
         check(keyed(k, 200, 5).equals("."), "mode A");
         check(keyed(k, 200, 85).equals(".-.-"), "squeeze alternates");
+
+        // silent presses: a paddle pressed and released without its element ever being sent
+        check(strays(Keyer.IAMBIC_A, 0, 5, 2, 8).equals(".|01"), "mode A silent dah");
+        check(strays(Keyer.IAMBIC_B, 0, 5, 2, 8).equals(".-|00"), "mode B remembered dah");
+        check(strays(Keyer.IAMBIC_B, 0, 3, 0, 0).equals(".|00"), "plain dit");
+        check(strays(Keyer.IAMBIC_B, 0, 25, 0, 0).equals("..|00"), "held dit");
+        {
+            Keyer s = new Keyer();
+            s.dit = 10;
+            for (int i = 0; i < 200; ++i) { s.ditIn = i < 3 || (i >= 6 && i < 9); s.step(); }
+            check(s.ditStrays == 1 && s.dahStrays == 0, "dit re-tapped mid-dit");
+        }
+        Verdict sv = judge(".-", ".-", d(60, 180), d(60), -1, -5, Keyer.IAMBIC_B, false, farnsworth(20, 20), new Criteria());
+        markStrays(sv, 0, 1);
+        check((sv.habits & STRAY_PRESS) != 0 && sv.worst == STRAY_PRESS && sv.notes.size() == 1 && sv.score == 100, "mark strays");
+
+        // repeated habit alert: 4 of the last 10
+        final Criteria ac = new Criteria();
+        final int[] cnt = {0};
+        check(repeatedHabit(Arrays.asList(GAP_SHORT, GAP_SHORT, GAP_SHORT, GAP_SHORT, GAP_SHORT, 0, 0, 0, 0, 0, 0, 0, 0, 0), ac, null) == 0, "alert window");
+        check(repeatedHabit(Arrays.asList(0, GAP_SHORT, WRONG_CHAR | MISSING_ELEM, GAP_SHORT, 0, GAP_SHORT | HINT_USED,
+                WRONG_CHAR | MISSING_ELEM, GAP_SHORT, 0, 0), ac, cnt) == GAP_SHORT && cnt[0] == 4, "alert gap short");
+        check(repeatedHabit(Arrays.asList(WRONG_CHAR | MISSING_ELEM, WRONG_CHAR | MISSING_ELEM, WRONG_CHAR | MISSING_ELEM,
+                WRONG_CHAR | MISSING_ELEM), ac, null) == MISSING_ELEM, "alert specific");
+        check(repeatedHabit(Arrays.asList(HINT_USED, HINT_USED, HINT_USED, HINT_USED), ac, null) == 0, "alert hint ignored");
+        check(repeatedHabit(new ArrayList<>(), ac, null) == 0, "alert empty");
 
         Decoder dec = new Decoder();
         dec.ditMs = 60; dec.spaceMs = 300;

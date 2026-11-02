@@ -199,7 +199,7 @@ final class StatsView extends View {
         Ui.text(c, "자주 나오는 버릇 (" + period + ", 시도 대비 비율)", 12, y + 14, 13, Ui.INK, true, -1, W - 24);
         y += 26;
         final List<double[]> hs = new ArrayList<>();
-        for (int h = 1; h <= Morse.SQUEEZE_LATE; h <<= 1) {
+        for (int h = 1; h <= Morse.STRAY_PRESS; h <<= 1) {
             final Agg a = agg((char) 0, days, 0, h);
             if (a.sum > 0) hs.add(new double[]{a.sum / a.n, h});
         }

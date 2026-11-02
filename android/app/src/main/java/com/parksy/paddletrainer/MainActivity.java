@@ -72,6 +72,8 @@ public class MainActivity extends Activity {
             new Field("levelAvg", "다음 글자 추가: 평균", 50, 100, "점", "코흐 방식: 90% 이상이면 다음 글자를 추가"),
             new Field("levelCount", "다음 글자 추가: 최근 시도", 5, 100, "회", "글자마다 최근 몇 번의 평균을 볼지"),
             new Field("hintFactor", "힌트 사용 시 점수", 0, 100, "%", ""),
+            new Field("alertWindow", "습관 알림: 최근 몇 회를 볼지", 3, 50, "회", "같은 습관이 반복되면 지적 사항 위에 경고를 띄웁니다"),
+            new Field("alertCount", "습관 알림: 몇 회 이상이면 경고", 2, 50, "회", "위 횟수 중 같은 습관이 이만큼 나오면 경고"),
             new Field("gapWeight", "간격 항목 가중치", 1, 5, "배", "Pierpont: 간격이 리듬의 핵심 — 간격 항목을 다른 항목의 몇 배로 셀지"),
             head("글자 간격 (dit 3개 ~ Farnsworth 사이면 만점)"),
             new Field("shortOk", "짧음: 만점 한계", 0, 100, "%", "표준 간격(dit 3개)보다 짧을 때. 글자가 붙으면 다른 글자로 들림 — 엄격하게"),
@@ -117,6 +119,7 @@ public class MainActivity extends Activity {
     double allUpAt = -1;      // when both paddles were last released, -1 while one is held
     double prevCharEnd = -1;  // end of the previous correct character in this word
     int owe;                  // correct repeats still needed for the current letter (1 per miss, up to crit.maxRepeat)
+    int ditStrays, dahStrays; // silent paddle presses since the last judged character
     Store store;
     String audioInfo = "";
     final Random rng = new Random();
@@ -131,7 +134,7 @@ public class MainActivity extends Activity {
     ExamView examView;
     StatsView stats;
     PaddleView paddleView;
-    TextView status, keyerInfo;
+    TextView status, keyerInfo, alert;
     ArrayAdapter<CharSequence> fixes;
     ListView fixList;
     Spinner gradeBox, minBox, periodBox, kindBox;
@@ -192,6 +195,15 @@ public class MainActivity extends Activity {
         fixTitle.setText("지적 사항  (최근이 위)");
         fixTitle.setTypeface(Typeface.DEFAULT_BOLD);
         practice.addView(fixTitle);
+        alert = label(12, Color.rgb(255, 210, 168));  // repeated bad habit warning (hidden when none)
+        GradientDrawable alertBg = new GradientDrawable();
+        alertBg.setColor(Color.rgb(90, 42, 16));
+        alertBg.setStroke(px(1), Ui.ORANGE);
+        alertBg.setCornerRadius(px(6));
+        alert.setBackground(alertBg);
+        alert.setPadding(px(8), px(6), px(8), px(6));
+        alert.setVisibility(View.GONE);
+        practice.addView(alert);
         fixes = new ArrayAdapter<CharSequence>(this, android.R.layout.simple_list_item_1, new ArrayList<>()) {
             @Override public View getView(int pos, View convert, ViewGroup parent) {
                 TextView tv = (TextView) super.getView(pos, convert, parent);
@@ -269,6 +281,7 @@ public class MainActivity extends Activity {
 
         apply();
         newWord();
+        updateAlert();
         showTab(0);
         setExamButtons(false);
     }
@@ -448,6 +461,7 @@ public class MainActivity extends Activity {
                     saveSettings();
                     owe = Math.min(owe, (int) crit.maxRepeat);
                     game.owe = owe;
+                    updateAlert();
                     apply();
                     if (levelChanged) newWord(); else newWordStatus();
                 })
@@ -639,6 +653,9 @@ public class MainActivity extends Activity {
             els = new ArrayList<>(tone.done);
             tone.done.clear();
             live = tone.liveStart;
+            ditStrays += tone.keyer.ditStrays;
+            dahStrays += tone.keyer.dahStrays;
+            tone.keyer.ditStrays = tone.keyer.dahStrays = 0;
         }
         for (Tone.Elem e : els) {
             dec.element(e.ms, e.sym);
@@ -722,6 +739,7 @@ public class MainActivity extends Activity {
 
     // A character decoded during the exam: rhythm-judge it as sent, or treat 6+ dits as the correction sign.
     void examChar(String sent, char c) {
+        ditStrays = dahStrays = 0;  // ponytail: the exam sheet has no item for silent presses; practice catches them
         if (!examView.running) { cur.clear(); return; }
         if (sent.length() >= 6 && sent.indexOf('-') < 0) {  // ........ = error, erase the last letter
             if (!examSent.isEmpty()) examSent.remove(examSent.size() - 1);
@@ -794,6 +812,17 @@ public class MainActivity extends Activity {
         return sp;
     }
 
+    // Repeated bad habit over the last practice attempts -> banner above the findings list.
+    void updateAlert() {
+        List<Integer> recent = new ArrayList<>();
+        for (int i = store.recs.size() - 1; i >= 0 && recent.size() < crit.alertWindow; --i)
+            if (store.recs.get(i).kind == 0) recent.add(0, store.recs.get(i).habits);
+        final int[] n = {0};
+        final int h = Morse.repeatedHabit(recent, crit, n);
+        alert.setVisibility(h != 0 ? View.VISIBLE : View.GONE);
+        if (h != 0) alert.setText("⚠ 반복되는 습관: " + Morse.habitName(h) + " — 최근 " + recent.size() + "회 중 " + n[0] + "회\n→ " + Morse.habitAdvice(h));
+    }
+
     void judge(String sent) {
         final char want = target();
         if (want == 0) { cur.clear(); return; }  // keyed during the word-clear pause
@@ -808,10 +837,14 @@ public class MainActivity extends Activity {
         // ponytail: release compared with the tone's render time; the audio buffer is not subtracted
         final double releaseLate = allUpAt >= 0 ? allUpAt - cur.get(cur.size() - 1).t1 : Double.NaN;
         final Morse.Verdict v = Morse.judge(ref, sent, on, gaps, charGap, releaseLate, mode, hint, timing, crit);
+        Morse.markStrays(v, ditStrays, dahStrays);
+        final boolean stray = (v.habits & Morse.STRAY_PRESS) != 0;
+        ditStrays = dahStrays = 0;
 
         game.releaseAt = straight ? -1 : allUpAt;
         game.charGap = charGap;
         store.save(new Store.Rec(System.currentTimeMillis() / 1000, want, sent.equals(ref), v.score, mode, wpm, eff, v.habits, 0));
+        updateAlert();
 
         last = new ArrayList<>(cur);
         lastRef = ref;
@@ -830,9 +863,15 @@ public class MainActivity extends Activity {
         prevCharEnd = last.get(last.size() - 1).t1;
         final int c = Ui.gradeColor(v.score);
         ++game.hits;
-        game.combo = v.score >= 70 ? game.combo + 1 : 0;  // sloppy keying breaks the combo too
+        game.combo = v.score >= 70 && !stray ? game.combo + 1 : 0;  // sloppy keying breaks the combo too
         game.bestCombo = Math.max(game.bestCombo, game.combo);
         game.score += Math.round(v.score * (1 + game.combo / 10.0));
+        if (stray) {  // right letter, but a paddle was pressed that never sounded: the hand motion failed
+            owe = Math.min(owe + 1, (int) crit.maxRepeat);
+            game.owe = owe;
+            report(want, "헛누름  ·  소리 안 난 패들 누름  ·  ↻ 같은 글자 " + owe + "회 더", Ui.RED, v);
+            return;
+        }
         if (v.score < crit.passScore) {  // right letter, rhythm under the pass mark: counts as a miss too
             owe = Math.min(owe + 1, (int) crit.maxRepeat);
             game.owe = owe;
