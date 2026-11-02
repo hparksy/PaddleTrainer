@@ -13,14 +13,16 @@
 - **통계:** 기록이 계속 쌓이고 글자별, 일별, 버릇별, 검정 문장별로 볼 수 있습니다.
 - **설정:** 모든 채점 기준을 바꿀 수 있고 기본값으로 되돌릴 수 있습니다.
 
-## 다운로드
+## 다운로드 (무료)
 
-[Releases](../../releases/latest) 페이지에서 최신 버전을 받습니다. 버전별 변경 사항은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
+| 기기 | 받기 |
+|---|---|
+| 🖥️ Windows 10/11 (64비트) | **[⬇ Windows 설치 파일 다운로드](https://github.com/hparksy/PaddleTrainer/releases/latest/download/PaddleTrainer-Setup.exe)** |
+| 📱 Android 8.0 이상 | **[⬇ Android 앱(APK) 다운로드](https://github.com/hparksy/PaddleTrainer/releases/latest/download/PaddleTrainer.apk)** |
 
-| 기기 | 파일 | 설치 |
-|---|---|---|
-| Windows 10/11 (64비트) | `PaddleTrainer-Setup-<버전>.exe` | 실행 후 안내대로 설치합니다. 관리자 권한이 필요 없습니다. SmartScreen 경고가 뜨면 **추가 정보 → 실행**을 누릅니다 (코드 서명이 없어서 뜨는 경고입니다). |
-| Android 8.0 이상 | `PaddleTrainer-<버전>.apk` | 폰에서 파일을 열고 **출처를 알 수 없는 앱 설치**를 허용합니다. |
+- 위 링크는 항상 최신 버전을 받습니다.
+- 📖 **처음이면 [설치 방법](INSTALL.md)을 보세요.** 경고 창이 뜰 때 무엇을 누르면 되는지 순서대로 적어 두었습니다.
+- 변경 사항은 [릴리즈 노트](CHANGELOG.md)에, 이전 버전은 [Releases](https://github.com/hparksy/PaddleTrainer/releases)에 있습니다.
 
 ## 패들 연결
 
@@ -37,12 +39,22 @@
 - **Windows:** `%APPDATA%\PaddleTrainer` (`attempts.csv`, `exams.csv`, `sentences.csv`, `settings.ini`). 앱을 지워도 남습니다.
 - **Android:** 앱 내부 저장소입니다. 앱을 지우면 함께 지워집니다.
 
+## 소스 구조
+
+| 폴더 | 내용 |
+|---|---|
+| `core/` | 공통 채점 엔진: 키어, 해독, 리듬 채점, 검정 채점 (`morse.h`, 자체 검사 `test_morse.cpp`) |
+| `desktop/` | Windows 앱 (Qt 5) + 설치 파일 스크립트 (Inno Setup) |
+| `android/` | Android 앱 (Java). `Morse.java`는 `core/morse.h`를 그대로 옮긴 것입니다 |
+| `tools/` | `build_all.bat`: 두 설치 파일을 `dist\`에 만듭니다. `release.ps1`: 태그, 푸시, GitHub 릴리즈를 만듭니다 |
+
+- 버전 번호는 `VERSION` 파일 하나로 관리합니다. 두 앱과 설치 파일이 모두 이 번호를 씁니다.
+- 변경 사항은 `CHANGELOG.md`에 적습니다.
+
 ## 직접 빌드
 
-- **Windows:** Qt 5.15.2 (msvc2019_64)와 Visual Studio 2022가 필요합니다.
-  - `build.bat`: 앱만 빌드합니다.
-  - `make_installer.bat`: 설치 파일까지 만듭니다 (Inno Setup 6 필요).
+- **Windows:** Qt 5.15.2 (msvc2019_64), Visual Studio 2022, Inno Setup 6이 필요합니다.
 - **Android:** JDK 17, Android SDK 35, Gradle 8.10이 필요합니다.
-  - `android\build_apk.bat`로 빌드합니다.
-- 두 앱의 채점 코드는 같은 내용입니다: `morse.h`와 `android/.../Morse.java`.
-  - 각 빌드 스크립트가 먼저 자체 검사(`test_morse.cpp`, `MorseTest.java`)를 돌립니다.
+- 두 앱을 한 번에 빌드하려면 `tools\build_all.bat`을 실행합니다.
+  - 따로 빌드할 때는 `desktop\make_installer.bat`, `android\build_apk.bat`을 씁니다.
+- 각 빌드는 채점 자체 검사를 먼저 돌립니다. 검사에 실패하면 빌드를 멈춥니다.

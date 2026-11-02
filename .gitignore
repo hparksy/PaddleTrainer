@@ -2,3 +2,4 @@ build/
 *.user
 .gradle/
 local.properties
+dist/

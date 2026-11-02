@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-// Java port of ../../../../../../../morse.h (keyer, decoder, scoring, exam grading). Keep the two in step.
+// Java port of core/morse.h (keyer, decoder, scoring, exam grading). Keep the two in step.
 final class Morse {
     static final String KOCH = "KMURESNAPTLWI.JZ=FOY,VG5/Q92H38B?47C1D60X";
 

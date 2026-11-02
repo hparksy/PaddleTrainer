@@ -9,6 +9,6 @@ windeployqt --no-translations --no-compiler-runtime --no-opengl-sw build\dist\Pa
 rem VC++ runtime next to the exe, so the target PC needs no redistributable install
 copy /y "%VCToolsRedistDir%x64\Microsoft.VC143.CRT\msvcp140*.dll" build\dist\ >nul || exit /b 1
 copy /y "%VCToolsRedistDir%x64\Microsoft.VC143.CRT\vcruntime140*.dll" build\dist\ >nul || exit /b 1
-set /p VER=<VERSION
+set /p VER=<..\VERSION
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /Q /DAppVer=%VER% installer.iss || exit /b 1
 echo installer: %CD%\build\installer

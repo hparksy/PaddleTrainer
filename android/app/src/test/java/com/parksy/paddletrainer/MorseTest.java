@@ -6,7 +6,7 @@ import java.util.List;
 
 import static com.parksy.paddletrainer.Morse.*;
 
-// Self-check for Morse.java, same cases as ../../../../../../../../test_morse.cpp. Run by android/build_apk.bat.
+// Self-check for Morse.java, same cases as core/test_morse.cpp. Run by android/build_apk.bat.
 public class MorseTest {
     static int fails = 0;
     static void check(boolean ok, String what) { if (!ok) { System.out.println("FAIL: " + what); ++fails; } }
