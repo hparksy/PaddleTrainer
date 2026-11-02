@@ -153,6 +153,12 @@ public:
     struct Bar { double t0, t1; QString label; bool stray = false; };  // t1 < 0 while held; stray = pressed, never sounded
     QVector<Bar> lanes[3];
     QVector<QPair<double, QString>> marks;          // decoded chars under the tone lane
+    // Standard timing of the letter being keyed, laid from its first tone: what each element's length should be.
+    struct Ref {
+        double t0, dit; QChar ch; std::string pattern;
+        double end() const { double t = t0; for (char c : pattern) t += (c == '.' ? 2 : 4) * dit; return t - dit; }
+    };
+    QVector<Ref> refs;
     double now = 0, liveTone = -1, ditMs = 80, windowMs = 4000;
 
     Timeline() { setMinimumHeight(170); }
@@ -162,6 +168,7 @@ public:
         double last = liveTone >= 0 ? now : -1e18;
         for (auto &l : lanes)
             for (auto &b : l) last = std::max(last, b.t1 < 0 ? now : b.t1);
+        for (auto &r : refs) last = std::max(last, std::min(now, r.end()));  // keep the whole guide on screen
         return last < -1e17 ? now : std::min(now, last + windowMs / 3);  // nothing keyed yet: just follow the clock
     }
     void prune() {
@@ -169,6 +176,7 @@ public:
         auto old = [&](const Bar &b) { return b.t1 >= 0 && b.t1 < v - windowMs; };
         for (auto &l : lanes) l.erase(std::remove_if(l.begin(), l.end(), old), l.end());
         marks.erase(std::remove_if(marks.begin(), marks.end(), [&](auto &m) { return m.first < v - windowMs; }), marks.end());
+        refs.erase(std::remove_if(refs.begin(), refs.end(), [&](const Ref &r) { return r.end() < v - windowMs; }), refs.end());
     }
 
 protected:
@@ -181,6 +189,16 @@ protected:
         p.setPen(QColor(32, 36, 48));
         for (double t = v - std::fmod(v, ditMs); X(t) >= left; t -= ditMs)
             p.drawLine(QPointF(X(t), 0), QPointF(X(t), height() - markH));
+        // standard element positions: faint bands through the paddle lanes, drawn under your bars
+        const QColor guide(90, 210, 255);
+        auto elems = [&](const Ref &r, auto fn) {
+            double t = r.t0;
+            for (char c : r.pattern) { const double len = (c == '.' ? 1 : 3) * r.dit; fn(t, t + len); t += len + r.dit; }
+        };
+        for (auto &r : refs)
+            elems(r, [&](double a, double b) {
+                p.fillRect(QRectF(QPointF(qMax(left, X(a)), 0), QPointF(X(b), 2 * laneH)), QColor(90, 210, 255, 28));
+            });
         static const char *names[] = {"[ dit", "] dah", "소리"};
         static const QColor colors[] = {QColor(80, 160, 255), QColor(255, 165, 60), QColor(80, 230, 140)};
         QFont f = font();
@@ -199,6 +217,19 @@ protected:
             };
             for (auto &b : lanes[i]) draw(b.t0, b.t1 < 0 ? now : b.t1, b.label, b.stray);
             if (i == 2 && liveTone >= 0) draw(liveTone, now, {}, false);
+        }
+        // ...and dashed outlines in the tone lane, on top, so your tone shows inside or past each box
+        for (auto &r : refs) {
+            p.setPen(QPen(guide, 2, Qt::DashLine));
+            p.setBrush(Qt::NoBrush);
+            elems(r, [&](double a, double b) {
+                if (X(b) > left) p.drawRect(QRectF(QPointF(qMax(left, X(a)), 2 * laneH + 3), QPointF(X(b), 3 * laneH - 3)));
+            });
+            if (X(r.end()) > left) {  // which letter the guide is for, just after it (a character gap is always free there)
+                f.setPointSize(8); p.setFont(f);
+                p.setPen(guide);
+                p.drawText(QRectF(X(r.end()) + 4, 2 * laneH + 3, 80, laneH - 6), Qt::AlignLeft | Qt::AlignTop, QString("기준 %1").arg(r.ch));
+            }
         }
         f.setPointSize(16); f.setBold(true); p.setFont(f);
         p.setPen(Qt::white);
@@ -985,6 +1016,7 @@ private:
     double prevCharEnd = -1;   // end of the previous correct character in this word
     int owe = 0;               // correct repeats still needed for the current letter (1 per miss, up to crit.maxRepeat)
     int ditStrays = 0, dahStrays = 0;  // silent paddle presses since the last judged character
+    bool refOpen = false;              // the timeline guide for the character being keyed is drawn
     Criteria crit;             // scoring rules, edited in the settings dialog
     QVector<Rec> recs;
     QTabWidget *tabs = new QTabWidget;
@@ -1334,6 +1366,14 @@ private:
         }
         ditStrays += sd;
         dahStrays += sh;
+        if (!refOpen && cur.isEmpty() && (live >= 0 || !els.isEmpty())) {  // first tone of a character: lay its standard timing
+            const double t0 = els.isEmpty() ? live : els[0].t0;
+            char want = target();
+            if (tabs->currentWidget() == examPage)
+                want = examView->running && examView->g.end < examView->g.letters.size() ? examView->g.letters[examView->g.end].want : 0;
+            if (want) timeline->refs.push_back({t0, timing.ditMs, QChar(want), patternOf(want)});
+            refOpen = true;
+        }
         for (int lane = 0; lane < 2; ++lane)  // the latest released bar of that paddle is the silent one
             for (int k = lane ? sh : sd, i = timeline->lanes[lane].size() - 1; k > 0 && i >= 0; --i)
                 if (auto &b = timeline->lanes[lane][i]; b.t1 >= 0 && !b.stray) { b.stray = true; --k; }
@@ -1347,6 +1387,7 @@ private:
         if (live < 0 && lastEnd > 0 && !cur.isEmpty()) {
             const std::string sent = dec.pattern;
             if (char c = dec.gap(now - lastEnd)) {
+                refOpen = false;
                 timeline->marks.push_back({(cur[0].t0 + lastEnd) / 2, QString(QChar(c))});
                 if (tabs->currentWidget() == examPage) examChar(sent, c);
                 else judge(sent);
