@@ -51,6 +51,12 @@
 - 버전 번호는 `VERSION` 파일 하나로 관리합니다. 두 앱과 설치 파일이 모두 이 번호를 씁니다.
 - 변경 사항은 `CHANGELOG.md`에 적습니다.
 
+## 라이선스
+
+[MIT License](LICENSE)입니다. 저작권 표시만 남기면 누구나 자유롭게 쓰고, 고치고, 다시 배포할 수 있습니다.
+- Windows 설치 파일에는 Qt(LGPL-3.0)와 VC++ 런타임이 함께 들어 있습니다. 자세한 내용은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 보세요.
+- 설치하면 `licenses` 폴더에 라이선스 전문이 들어갑니다.
+
 ## 직접 빌드
 
 - **Windows:** Qt 5.15.2 (msvc2019_64), Visual Studio 2022, Inno Setup 6이 필요합니다.
