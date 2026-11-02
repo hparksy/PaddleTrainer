@@ -21,6 +21,7 @@
 | 📱 Android 8.0 이상 | **[⬇ Android 앱(APK) 다운로드](https://github.com/hparksy/PaddleTrainer/releases/latest/download/PaddleTrainer.apk)** |
 
 - 위 링크는 항상 최신 버전을 받습니다.
+- 🎯 **연습은 [연습 가이드](PRACTICE.md)대로 하세요.** 바른 자세, 하루 20분 연습 순서, 단계별 목표, 지적 사항 고치는 법, 좋은 습관과 피할 습관을 교재 기준으로 정리했습니다.
 - 📖 **처음이면 [설치 방법](INSTALL.md)을 보세요.** 경고 창이 뜰 때 무엇을 누르면 되는지 순서대로 적어 두었습니다.
 - 변경 사항은 [릴리즈 노트](CHANGELOG.md)에, 이전 버전은 [Releases](https://github.com/hparksy/PaddleTrainer/releases)에 있습니다.
 
