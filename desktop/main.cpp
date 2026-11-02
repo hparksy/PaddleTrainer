@@ -156,21 +156,30 @@ public:
     double now = 0, liveTone = -1, ditMs = 80, windowMs = 4000;
 
     Timeline() { setMinimumHeight(170); }
+    // Time at the right edge. Once you stop keying it stops scrolling when the empty space after your last
+    // contact or tone fills a third of the window, so the last characters stay on screen to look at.
+    double view() const {
+        double last = liveTone >= 0 ? now : -1e18;
+        for (auto &l : lanes)
+            for (auto &b : l) last = std::max(last, b.t1 < 0 ? now : b.t1);
+        return last < -1e17 ? now : std::min(now, last + windowMs / 3);  // nothing keyed yet: just follow the clock
+    }
     void prune() {
-        auto old = [&](const Bar &b) { return b.t1 >= 0 && b.t1 < now - windowMs; };
+        const double v = view();
+        auto old = [&](const Bar &b) { return b.t1 >= 0 && b.t1 < v - windowMs; };
         for (auto &l : lanes) l.erase(std::remove_if(l.begin(), l.end(), old), l.end());
-        marks.erase(std::remove_if(marks.begin(), marks.end(), [&](auto &m) { return m.first < now - windowMs; }), marks.end());
+        marks.erase(std::remove_if(marks.begin(), marks.end(), [&](auto &m) { return m.first < v - windowMs; }), marks.end());
     }
 
 protected:
     void paintEvent(QPaintEvent *) override {
         QPainter p(this);
         p.fillRect(rect(), QColor(12, 13, 20));
-        const double left = 90, w = width() - left - 10;
-        auto X = [&](double t) { return left + w - (now - t) / windowMs * w; };
+        const double left = 90, w = width() - left - 10, v = view();
+        auto X = [&](double t) { return left + w - (v - t) / windowMs * w; };
         const int markH = 36, laneH = (height() - markH) / 3;
         p.setPen(QColor(32, 36, 48));
-        for (double t = now - std::fmod(now, ditMs); X(t) >= left; t -= ditMs)
+        for (double t = v - std::fmod(v, ditMs); X(t) >= left; t -= ditMs)
             p.drawLine(QPointF(X(t), 0), QPointF(X(t), height() - markH));
         static const char *names[] = {"[ dit", "] dah", "소리"};
         static const QColor colors[] = {QColor(80, 160, 255), QColor(255, 165, 60), QColor(80, 230, 140)};
@@ -195,7 +204,8 @@ protected:
         for (auto &m : marks) p.drawText(QRectF(X(m.first) - 30, height() - markH, 60, markH), Qt::AlignCenter, m.second);
         f.setPointSize(8); f.setBold(false); p.setFont(f);
         p.setPen(QColor(100, 105, 120));
-        p.drawText(rect().adjusted(0, 2, -8, 0), Qt::AlignRight | Qt::AlignTop, QString("격자 1칸 = 1 dit = %1 ms").arg(ditMs, 0, 'f', 0));
+        p.drawText(rect().adjusted(0, 2, -8, 0), Qt::AlignRight | Qt::AlignTop,
+                   QString("%1격자 1칸 = 1 dit = %2 ms").arg(v < now ? "⏸ 멈춤 (치면 다시 움직임)   ·   " : "").arg(ditMs, 0, 'f', 0));
     }
 };
 
