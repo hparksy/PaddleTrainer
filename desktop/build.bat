@@ -8,6 +8,8 @@ cd build
 cl /nologo /std:c++17 /EHsc /utf-8 ..\..\core\test_morse.cpp >nul || exit /b 1
 .\test_morse.exe || exit /b 1
 qmake ..\PaddleTrainer.pro CONFIG+=release || exit /b 1
+rem APP_VERSION is a compiler define, which nmake does not track: always recompile so the title shows the current VERSION
+if exist release\main.obj del release\main.obj
 nmake /nologo || exit /b 1
 windeployqt --no-translations --no-compiler-runtime release\PaddleTrainer.exe >nul || exit /b 1
 echo built: %CD%\release\PaddleTrainer.exe
