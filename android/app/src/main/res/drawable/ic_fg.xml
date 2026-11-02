@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- dit + dah, the app's two paddles -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#5AD2FF" android:pathData="M30,48h12a6,6 0,0 1,0 12h-12a6,6 0,0 1,0 -12z" />
+    <path android:fillColor="#FFA53C" android:pathData="M52,48h26a6,6 0,0 1,0 12h-26a6,6 0,0 1,0 -12z" />
+</vector>
