@@ -1,6 +1,8 @@
 ; Inno Setup script: per-user install (no admin), Start menu + optional desktop shortcut.
 ; Built by make_installer.bat from build\dist. Practice records in %APPDATA%\PaddleTrainer are kept on uninstall.
-#define AppVer "1.0"
+#ifndef AppVer
+  #define AppVer "0.0.0"  ; make_installer.bat passes the VERSION file as /DAppVer
+#endif
 
 [Setup]
 AppId={{5001FD5F-BF7E-406B-AD7A-49565A371994}

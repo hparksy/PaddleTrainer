@@ -785,7 +785,7 @@ class App : public QWidget {
 public:
 
     App() {
-        setWindowTitle("Paddle Trainer");
+        setWindowTitle("Paddle Trainer " APP_VERSION);
         clock.start();
         tone.clock = &clock;
         loadRecs();

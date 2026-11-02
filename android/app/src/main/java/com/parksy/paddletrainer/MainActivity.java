@@ -581,7 +581,11 @@ public class MainActivity extends Activity {
         }
         final String next = ready && n < KOCH.length() ? "  ·  ★ 다음 글자 '" + KOCH.charAt(n) + "' 추가 권장 (⚙ 설정 → 연습 글자 수)"
                 : "  ·  글자 추가 기준: 모든 글자 최근 " + GameView.fmt(crit.levelCount) + "회 평균 " + GameView.fmt(crit.levelAvg) + "점";
-        status.setText("연습 글자: " + stats.koch + next + "\nUSB 패들 [ ] 키 (어댑터 모드 2, OTG) 또는 아래 화면 패들  ·  " + audioInfo);
+        status.setText("연습 글자: " + stats.koch + next + "\nUSB 패들 [ ] 키 (어댑터 모드 2, OTG) 또는 아래 화면 패들  ·  " + audioInfo + "  ·  v" + version());
+    }
+
+    String version() {
+        try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return "?"; }
     }
 
     void refreshStats() {
