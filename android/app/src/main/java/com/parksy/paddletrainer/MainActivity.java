@@ -105,6 +105,7 @@ public class MainActivity extends Activity {
     // keyer / practice settings (desktop toolbar values)
     int mode = Morse.Keyer.IAMBIC_B, wpm = 18, eff = 10, freq = 600, vol = 50, level = 2;
     boolean swap, hint;
+    String focus = "";  // focus letters: practise only these (empty = Koch order)
     Morse.Criteria crit = new Morse.Criteria();
 
     final Tone tone = new Tone();
@@ -134,7 +135,7 @@ public class MainActivity extends Activity {
     ArrayAdapter<CharSequence> fixes;
     ListView fixList;
     Spinner gradeBox, minBox, periodBox, kindBox;
-    TextView startBtn, stopBtn;
+    TextView startBtn, stopBtn, focusBtn;
 
     // exam
     final List<Morse.ExamChar> examSent = new ArrayList<>();
@@ -179,6 +180,8 @@ public class MainActivity extends Activity {
         bar.addView(button("▶ 글자", Color.rgb(51, 85, 221), v -> listenTo(false)), weight());
         bar.addView(button("▶ 단어", Color.rgb(51, 85, 221), v -> listenTo(true)), weight());
         bar.addView(button("새 단어", Color.rgb(51, 85, 221), v -> newWord()), weight());
+        focusBtn = button("🎯 집중", Color.rgb(51, 85, 221), v -> openFocus());
+        bar.addView(focusBtn, weight());
         practice.addView(bar);
         keyerInfo = label(11, Ui.MUTED);
         practice.addView(keyerInfo);
@@ -379,13 +382,14 @@ public class MainActivity extends Activity {
         mode = p.getInt("ui/mode", mode); wpm = p.getInt("ui/wpm", wpm); eff = p.getInt("ui/eff", eff);
         freq = p.getInt("ui/freq", freq); vol = p.getInt("ui/vol", vol); level = p.getInt("ui/level", level);
         swap = p.getBoolean("ui/swap", false); hint = p.getBoolean("ui/hint", false);
+        focus = focusPool(p.getString("ui/focus", ""));
     }
 
     void saveSettings() {
         SharedPreferences.Editor e = prefs().edit();
         for (Field f : FIELDS) if (f.key != null) e.putString("criteria/" + f.key, String.valueOf(getCrit(crit, f.key)));
         e.putInt("ui/mode", mode).putInt("ui/wpm", wpm).putInt("ui/eff", eff).putInt("ui/freq", freq).putInt("ui/vol", vol)
-                .putInt("ui/level", level).putBoolean("ui/swap", swap).putBoolean("ui/hint", hint).apply();
+                .putInt("ui/level", level).putBoolean("ui/swap", swap).putBoolean("ui/hint", hint).putString("ui/focus", focus).apply();
     }
 
     void openSettings() {
@@ -546,17 +550,45 @@ public class MainActivity extends Activity {
         return n > 0 ? 1 + 12 * d * d : 4;  // never practised: extra weight
     }
 
+    // focus letters (upper-cased, Koch letters only, no repeats); empty = normal Koch practice
+    static String focusPool(String text) {
+        StringBuilder pool = new StringBuilder();
+        for (char c : text.toUpperCase(java.util.Locale.ROOT).toCharArray())
+            if (KOCH.indexOf(c) >= 0 && pool.indexOf(String.valueOf(c)) < 0) pool.append(c);
+        return pool.toString();
+    }
+
+    void openFocus() {
+        EditText e = new EditText(this);
+        e.setText(focus);
+        e.setHint("예: R  (여러 글자도 됨: RK)");
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        e.setSelectAllOnFocus(true);
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(px(20), px(8), px(20), 0);
+        box.addView(e);
+        new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("🎯 집중 연습")
+                .setMessage("이 글자만 반복해서 연습합니다. 해제하면 코흐 순서로 돌아갑니다.")
+                .setView(box)
+                .setPositiveButton("적용", (d, w) -> { focus = focusPool(e.getText().toString()); saveSettings(); newWord(); })
+                .setNeutralButton("해제", (d, w) -> { focus = ""; saveSettings(); newWord(); })
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
     void newWord() {
         final int n = level;
-        final double[] w = new double[n];
+        final String set = focus.isEmpty() ? KOCH.substring(0, n) : focus;
+        final double[] w = new double[set.length()];
         double total = 0;
-        for (int i = 0; i < n; ++i) total += w[i] = weight(KOCH.charAt(i));
+        for (int i = 0; i < set.length(); ++i) total += w[i] = weight(set.charAt(i));
         StringBuilder word = new StringBuilder();
         for (int k = 0; k < WORD_LEN; ++k) {
             double r = rng.nextDouble() * total;
             int i = 0;
-            while (i < n - 1 && (r -= w[i]) > 0) ++i;
-            word.append(KOCH.charAt(i));
+            while (i < set.length() - 1 && (r -= w[i]) > 0) ++i;
+            word.append(set.charAt(i));
         }
         game.word = word.toString();
         game.pos = 0;
@@ -581,7 +613,11 @@ public class MainActivity extends Activity {
         }
         final String next = ready && n < KOCH.length() ? "  ·  ★ 다음 글자 '" + KOCH.charAt(n) + "' 추가 권장 (⚙ 설정 → 연습 글자 수)"
                 : "  ·  글자 추가 기준: 모든 글자 최근 " + GameView.fmt(crit.levelCount) + "회 평균 " + GameView.fmt(crit.levelAvg) + "점";
-        status.setText("연습 글자: " + stats.koch + next + "\nUSB 패들 [ ] 키 (어댑터 모드 2, OTG) 또는 아래 화면 패들  ·  " + audioInfo + "  ·  v" + version());
+        final String head = focus.isEmpty() ? "연습 글자: " + stats.koch + next
+                : "🎯 집중 연습: " + focus + "  ·  '🎯 집중' → 해제하면 코흐 순서(" + stats.koch + ")로 돌아갑니다";
+        tint(focusBtn, focus.isEmpty() ? Color.rgb(51, 85, 221) : Ui.ORANGE);
+        focusBtn.setText(focus.isEmpty() ? "🎯 집중" : "🎯 " + focus);
+        status.setText(head + "\nUSB 패들 [ ] 키 (어댑터 모드 2, OTG) 또는 아래 화면 패들  ·  " + audioInfo + "  ·  v" + version());
     }
 
     String version() {

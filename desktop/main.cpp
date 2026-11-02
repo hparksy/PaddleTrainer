@@ -7,6 +7,7 @@
 #include <wrl/client.h>
 #include <QtWidgets>
 #include <atomic>
+#include <cstring>
 #include <future>
 #include <thread>
 #include "morse.h"
@@ -797,11 +798,16 @@ public:
         eff->setRange(5, 40); eff->setValue(10);
         eff->setToolTip("Farnsworth: 글자는 '글자 WPM'으로 치고, 글자·단어 사이 간격만 늘려 전체 속도를 이 값으로 맞춥니다");
         freq->setRange(300, 1200); freq->setSingleStep(50); freq->setValue(600);
-        vol->setRange(0, 100); vol->setValue(50); vol->setMaximumWidth(90);
+        vol->setRange(0, 100); vol->setValue(50); vol->setMaximumWidth(90); vol->setMinimumWidth(60);
         level->setRange(2, int(sizeof KOCH) - 1); level->setValue(2);
         span->setRange(1, 15); span->setValue(4);
         add("모드", mode); add("글자 WPM", wpm); add("실효 WPM", eff); add("톤", freq); add("볼륨", vol);
-        add("글자 수", level); add("표시 초", span);
+        add("글자 수", level);
+        focusEdit->setPlaceholderText("예: R");
+        focusEdit->setMaximumWidth(80);
+        focusEdit->setToolTip("이 글자만 반복 연습합니다 (여러 글자도 됨, 예: RK). 비우면 코흐 순서로 돌아갑니다");
+        add("집중 글자", focusEdit);
+        add("표시 초", span);
         bar->addWidget(swap); bar->addWidget(hint);
         auto *listen = new QPushButton("▶ 글자");
         auto *listenWord = new QPushButton("▶ 단어");
@@ -892,6 +898,7 @@ public:
         connect(vol, &QSlider::valueChanged, this, &App::apply);
         connect(hint, &QCheckBox::toggled, this, &App::apply);
         connect(level, qOverload<int>(&QSpinBox::valueChanged), this, &App::newWord);
+        connect(focusEdit, &QLineEdit::textEdited, this, [this] { focusEdit->setText(focusPool()); newWord(); });
         connect(listen, &QPushButton::clicked, this, [this] { listenTo(false); });
         connect(listenWord, &QPushButton::clicked, this, [this] { listenTo(true); });
         connect(skip, &QPushButton::clicked, this, &App::newWord);
@@ -973,6 +980,7 @@ private:
     QSpinBox *wpm = new QSpinBox, *eff = new QSpinBox, *freq = new QSpinBox, *level = new QSpinBox, *span = new QSpinBox;
     QSlider *vol = new QSlider(Qt::Horizontal);
     QCheckBox *swap = new QCheckBox("좌우 반전"), *hint = new QCheckBox("힌트");
+    QLineEdit *focusEdit = new QLineEdit;  // focus letters: practise only these (empty = Koch order)
     QComboBox *kindBox = new QComboBox;
     // exam
     QWidget *examPage = new QWidget;
@@ -1109,6 +1117,7 @@ private:
         vol->setValue(st.value("ui/vol", vol->value()).toInt());
         swap->setChecked(st.value("ui/swap", false).toBool());
         hint->setChecked(st.value("ui/hint", false).toBool());
+        focusEdit->setText(st.value("ui/focus").toString());
     }
     void saveSettings() {
         QSettings st(settingsPath(), QSettings::IniFormat);
@@ -1119,6 +1128,7 @@ private:
         st.setValue("ui/vol", vol->value());
         st.setValue("ui/swap", swap->isChecked());
         st.setValue("ui/hint", hint->isChecked());
+        st.setValue("ui/focus", focusPool());
     }
     void closeEvent(QCloseEvent *e) override { saveSettings(); QWidget::closeEvent(e); }
 
@@ -1236,17 +1246,27 @@ private:
         return n ? 1 + 12 * d * d : 4;  // never practised: extra weight
     }
 
+    // focus letters typed by the user (upper-cased, Koch letters only, no repeats); empty = normal Koch practice
+    QString focusPool() const {
+        QString pool;
+        for (QChar c : focusEdit->text().toUpper())
+            if (c.unicode() < 128 && std::strchr(KOCH, c.toLatin1()) && !pool.contains(c)) pool += c;
+        return pool;
+    }
+
     void newWord() {
         const int n = level->value();
-        QVector<double> w(n);
+        const QString pool = focusPool();
+        const QString set = pool.isEmpty() ? QString::fromLatin1(KOCH, n) : pool;
+        QVector<double> w(set.size());
         double total = 0;
-        for (int i = 0; i < n; ++i) total += w[i] = weight(KOCH[i]);
+        for (int i = 0; i < set.size(); ++i) total += w[i] = weight(set[i].toLatin1());
         game->word.clear();
         for (int k = 0; k < WORD_LEN; ++k) {
             double r = QRandomGenerator::global()->bounded(total);
             int i = 0;
-            while (i < n - 1 && (r -= w[i]) > 0) ++i;
-            game->word += KOCH[i];
+            while (i < set.size() - 1 && (r -= w[i]) > 0) ++i;
+            game->word += set[i];
         }
         game->pos = 0;
         game->doneColor.clear();
@@ -1265,7 +1285,9 @@ private:
         }
         const QString next = ready && n < int(sizeof KOCH) - 1 ? QString("   ·   ★ 다음 글자 '%1' 추가 권장").arg(KOCH[n])
                                                                 : QString("   ·   글자 추가 기준: 모든 글자 최근 20회 평균 90점");
-        status->setText(QString("연습 글자: %1%2   ·   [ ] 키 (어댑터 모드 2) 또는 화면 위 마우스 좌/우 클릭   ·   %3").arg(stats->koch, next, audioInfo));
+        const QString head = pool.isEmpty() ? QString("연습 글자: %1%2").arg(stats->koch, next)
+                                            : QString("🎯 집중 연습: %1   ·   '집중 글자'를 비우면 코흐 순서(%2)로 돌아갑니다").arg(pool, stats->koch);
+        status->setText(QString("%1   ·   [ ] 키 (어댑터 모드 2) 또는 화면 위 마우스 좌/우 클릭   ·   %2").arg(head, audioInfo));
     }
 
     void refreshStats() {
