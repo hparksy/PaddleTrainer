@@ -2,6 +2,7 @@ package com.parksy.paddletrainer;
 
 import android.content.Context;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
@@ -28,6 +29,7 @@ final class Tone implements Runnable {
     final ArrayList<Elem> done = new ArrayList<>();  // finished elements, drained by the UI
     double liveStart = -1;                     // wall ms of the tone sounding now, -1 when silent
     double bufferMs;
+    AudioDeviceInfo preferred;  // output to play on, null = the system's choice
 
     private AudioTrack track;
     private Thread th;
@@ -70,6 +72,7 @@ final class Tone implements Runnable {
                     .setBufferSizeInBytes(Math.max(AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT), burst * 2 * 4))
                     .build();
             track.setBufferSizeInFrames(burst * 2);  // two bursts: smallest that does not glitch on most phones
+            if (preferred != null) track.setPreferredDevice(preferred);
         } catch (Exception e) {
             return "오디오 초기화 실패: " + e.getMessage();
         }

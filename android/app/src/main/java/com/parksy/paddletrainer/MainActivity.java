@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -108,6 +110,7 @@ public class MainActivity extends Activity {
     int mode = Morse.Keyer.IAMBIC_B, wpm = 18, eff = 10, freq = 600, vol = 50, level = 2;
     boolean swap, hint;
     String focus = "";  // focus letters: practise only these (empty = Koch order)
+    String device = ""; // output device "type:product name", empty = system default
     Morse.Criteria crit = new Morse.Criteria();
 
     final Tone tone = new Tone();
@@ -288,12 +291,41 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        final String err = tone.start(this);
-        if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show();
-        audioInfo = String.format("오디오 버퍼 %.1f ms", tone.bufferMs);
+        startAudio();
         apply();
         newWordStatus();
         ui.post(ticker);
+    }
+
+    // ---- output device ----
+    // Outputs worth playing a sidetone on (not the call earpiece or telephony routes).
+    List<AudioDeviceInfo> outputs() {
+        List<AudioDeviceInfo> out = new ArrayList<>();
+        for (AudioDeviceInfo d : ((AudioManager) getSystemService(AUDIO_SERVICE)).getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            final int t = d.getType();
+            if (t != AudioDeviceInfo.TYPE_BUILTIN_EARPIECE && t != AudioDeviceInfo.TYPE_TELEPHONY && t != AudioDeviceInfo.TYPE_REMOTE_SUBMIX &&
+                    t != AudioDeviceInfo.TYPE_BLUETOOTH_SCO && t != AudioDeviceInfo.TYPE_BUS) out.add(d);
+        }
+        return out;
+    }
+    static String deviceKey(AudioDeviceInfo d) { return d.getType() + ":" + d.getProductName(); }
+    static String deviceLabel(AudioDeviceInfo d) {
+        final int t = d.getType();
+        final String kind = t == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? "폰 스피커"
+                : t == AudioDeviceInfo.TYPE_WIRED_HEADSET || t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ? "유선 이어폰"
+                : t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? "블루투스 (소리 늦음)"
+                : t == AudioDeviceInfo.TYPE_USB_DEVICE || t == AudioDeviceInfo.TYPE_USB_HEADSET ? "USB 오디오"
+                : t == AudioDeviceInfo.TYPE_HDMI ? "HDMI" : "기타";
+        return kind + " · " + d.getProductName();
+    }
+
+    void startAudio() {
+        tone.preferred = null;
+        for (AudioDeviceInfo d : outputs()) if (deviceKey(d).equals(device)) tone.preferred = d;
+        final String err = tone.start(this);
+        if (err != null) Toast.makeText(this, err, Toast.LENGTH_LONG).show();
+        audioInfo = String.format("소리: %s%s · 버퍼 %.1f ms", tone.preferred == null ? "시스템 기본" : deviceLabel(tone.preferred),
+                tone.preferred == null && !device.isEmpty() ? " (선택한 장치가 없어 기본으로)" : "", tone.bufferMs);
     }
 
     @Override protected void onPause() {
@@ -396,19 +428,33 @@ public class MainActivity extends Activity {
         freq = p.getInt("ui/freq", freq); vol = p.getInt("ui/vol", vol); level = p.getInt("ui/level", level);
         swap = p.getBoolean("ui/swap", false); hint = p.getBoolean("ui/hint", false);
         focus = focusPool(p.getString("ui/focus", ""));
+        device = p.getString("ui/device", "");
     }
 
     void saveSettings() {
         SharedPreferences.Editor e = prefs().edit();
         for (Field f : FIELDS) if (f.key != null) e.putString("criteria/" + f.key, String.valueOf(getCrit(crit, f.key)));
         e.putInt("ui/mode", mode).putInt("ui/wpm", wpm).putInt("ui/eff", eff).putInt("ui/freq", freq).putInt("ui/vol", vol)
-                .putInt("ui/level", level).putBoolean("ui/swap", swap).putBoolean("ui/hint", hint).putString("ui/focus", focus).apply();
+                .putInt("ui/level", level).putBoolean("ui/swap", swap).putBoolean("ui/hint", hint).putString("ui/focus", focus).putString("ui/device", device).apply();
     }
 
     void openSettings() {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(px(16), px(8), px(16), px(8));
+
+        form.addView(section("소리 출력 장치"));
+        final List<AudioDeviceInfo> outs = outputs();
+        final String[] outNames = new String[outs.size() + 1];
+        outNames[0] = "시스템 기본 (안드로이드가 고름)";
+        int outSel = 0;
+        for (int i = 0; i < outs.size(); ++i) {
+            outNames[i + 1] = deviceLabel(outs.get(i));
+            if (deviceKey(outs.get(i)).equals(device)) outSel = i + 1;
+        }
+        Spinner outBox = spinner(outNames);
+        outBox.setSelection(outSel);
+        form.addView(outBox);
 
         form.addView(section("키어 / 연습"));
         Spinner modeBox = spinner(MODES);
@@ -448,6 +494,13 @@ public class MainActivity extends Activity {
                     final int[] lo = {5, 5, 300, 0, 2}, hi = {40, 40, 1200, 100, KOCH.length()};
                     final int[] v = new int[5];
                     for (int i = 0; i < 5; ++i) v[i] = (int) Math.max(lo[i], Math.min(hi[i], parse(intBoxes.get(i), (int) ints[i][3])));
+                    final int o = outBox.getSelectedItemPosition();
+                    final String newDevice = o == 0 ? "" : deviceKey(outs.get(o - 1));
+                    if (!newDevice.equals(device)) {  // switch the sound to the chosen device now
+                        device = newDevice;
+                        tone.stop();
+                        startAudio();
+                    }
                     mode = modeBox.getSelectedItemPosition();
                     wpm = v[0]; eff = Math.min(v[1], v[0]); freq = v[2]; vol = v[3];
                     final boolean levelChanged = v[4] != level;

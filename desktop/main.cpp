@@ -19,10 +19,43 @@ constexpr int WORD_LEN = 5;
 
 struct Elem { double t0, t1, ms; char sym; };  // wall-clock ms of a keyed tone; ms is sample-exact
 
+// PKEY_Device_FriendlyName, spelled out so no extra library is needed for its definition
+static const PROPERTYKEY kFriendlyName = {{0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14};
+
+static QString deviceName(IMMDevice *dev) {
+    ComPtr<IPropertyStore> props;
+    PROPVARIANT v;
+    PropVariantInit(&v);
+    QString name;
+    if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &props)) && SUCCEEDED(props->GetValue(kFriendlyName, &v)) && v.vt == VT_LPWSTR)
+        name = QString::fromWCharArray(v.pwszVal);
+    PropVariantClear(&v);
+    return name;
+}
+
+// Active audio outputs as (endpoint id, friendly name).
+static QVector<QPair<QString, QString>> audioOutputs() {
+    QVector<QPair<QString, QString>> out;
+    ComPtr<IMMDeviceEnumerator> en;
+    ComPtr<IMMDeviceCollection> all;
+    UINT n = 0;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&en))) ||
+        FAILED(en->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &all)) || FAILED(all->GetCount(&n)))
+        return out;
+    for (UINT i = 0; i < n; ++i) {
+        ComPtr<IMMDevice> dev;
+        LPWSTR id = nullptr;
+        if (FAILED(all->Item(i, &dev)) || FAILED(dev->GetId(&id))) continue;
+        out.push_back({QString::fromWCharArray(id), deviceName(dev.Get())});
+        CoTaskMemFree(id);
+    }
+    return out;
+}
+
 // Sidetone + keyer on a WASAPI low-latency render thread; the keyer runs per sample in render().
 class Tone {
 public:
-    ~Tone() { running = false; if (th.joinable()) th.join(); }
+    ~Tone() { stop(); }
     Keyer keyer;
     std::atomic<bool> ditIn{false}, dahIn{false};
     double freq = 600, vol = 0.5;
@@ -46,6 +79,14 @@ public:
 
     double bufferMs = 0;      // audio buffer = added output latency
     bool lowLatency = false;  // driver accepted a smaller-than-default engine period
+    QString deviceId;         // output endpoint to use, empty = the Windows default
+    QString usedName;         // friendly name of the device actually playing
+    bool fellBack = false;    // deviceId was not available, the default device plays instead
+
+    void stop() {
+        running = false;
+        if (th.joinable()) th.join();
+    }
 
     QString start() {  // returns an error text, empty on success
         std::promise<QString> ready;
@@ -71,8 +112,9 @@ private:
             UINT32 bufFrames = 0;
             const char *fail = nullptr;
             if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&en)))) fail = "장치 목록";
-            else if (FAILED(en->GetDefaultAudioEndpoint(eRender, eConsole, &dev))) fail = "기본 출력 장치";
-            else if (FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &ac))) fail = "오디오 클라이언트";
+            else if ((fellBack = !deviceId.isEmpty() && FAILED(en->GetDevice(reinterpret_cast<LPCWSTR>(deviceId.utf16()), &dev))),
+                     !dev && FAILED(en->GetDefaultAudioEndpoint(eRender, eConsole, &dev))) fail = "기본 출력 장치";
+            else if (usedName = deviceName(dev.Get()), FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &ac))) fail = "오디오 클라이언트";
             else if (FAILED(ac->GetMixFormat(&fmt)) || fmt->wBitsPerSample != 32) fail = "출력 형식(32bit float 아님)";
             else {
                 // smallest engine period the driver allows (Win10+), else the default ~10 ms
@@ -1169,6 +1211,7 @@ private:
         for (auto [key, sb] : uiBoxes()) sb->setValue(st.value(QString("ui/") + key, sb->value()).toInt());
         vol->setValue(st.value("ui/vol", vol->value()).toInt());
         swap->setChecked(st.value("ui/swap", false).toBool());
+        tone.deviceId = st.value("ui/device").toString();
         hint->setChecked(st.value("ui/hint", false).toBool());
         focusEdit->setText(st.value("ui/focus").toString());
     }
@@ -1180,6 +1223,7 @@ private:
         for (auto [key, sb] : uiBoxes()) st.setValue(QString("ui/") + key, sb->value());
         st.setValue("ui/vol", vol->value());
         st.setValue("ui/swap", swap->isChecked());
+        st.setValue("ui/device", tone.deviceId);
         st.setValue("ui/hint", hint->isChecked());
         st.setValue("ui/focus", focusPool());
     }
@@ -1189,6 +1233,15 @@ private:
         QDialog dlg(this);
         dlg.setWindowTitle("채점 기준 설정");
         auto *form = new QFormLayout;
+        auto *outHead = new QLabel("소리 출력 장치");
+        outHead->setStyleSheet("color:#8fb4ff; font-weight:bold; margin-top:8px");
+        form->addRow(outHead);
+        auto *outBox = new QComboBox;
+        outBox->addItem("Windows 기본 장치", QString());
+        for (auto &[id, name] : audioOutputs()) outBox->addItem(name, id);
+        outBox->setCurrentIndex(qMax(0, outBox->findData(tone.deviceId)));
+        outBox->setToolTip("사이드톤을 낼 장치. 블루투스는 소리가 늦게 들려 연습에 맞지 않습니다");
+        form->addRow("출력 장치", outBox);
         std::vector<std::pair<QDoubleSpinBox *, const Field *>> boxes;
         for (auto &f : fields()) {
             if (!f.m) {
@@ -1241,6 +1294,13 @@ private:
         if (dlg.exec() != QDialog::Accepted) return;
         for (auto [sb, f] : boxes) crit.*(f->m) = sb->value();
         sanitize(crit);
+        if (outBox->currentData().toString() != tone.deviceId) {  // switch the sound to the chosen device now
+            tone.deviceId = outBox->currentData().toString();
+            tone.stop();
+            startAudio();
+            apply();
+            newWord();
+        }
         saveSettings();
         owe = qMin(owe, int(crit.maxRepeat));
         updateAlert();
@@ -1250,7 +1310,8 @@ private:
     void startAudio() {
         const QString err = tone.start();
         if (!err.isEmpty()) QMessageBox::warning(this, "Paddle Trainer", err);
-        audioInfo = QString("오디오 버퍼 %1 ms").arg(tone.bufferMs, 0, 'f', 1);
+        audioInfo = QString("소리: %1%2 · 버퍼 %3 ms").arg(tone.usedName.isEmpty() ? "-" : tone.usedName)
+                        .arg(tone.fellBack ? " (선택한 장치가 없어 기본 장치로)" : "").arg(tone.bufferMs, 0, 'f', 1);
     }
 
     void apply() {
