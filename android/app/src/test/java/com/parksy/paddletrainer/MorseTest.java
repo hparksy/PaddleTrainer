@@ -126,7 +126,7 @@ public class MorseTest {
         v = judge(".-", ".-", d(60, 180), d(120), -1, -5, B, false, t, c);
         check(v.score == 33 && v.worst == ELEM_HESITATE, "hesitate " + v.score);
         v = judge(".-", ".-", d(60, 180), d(60), 400, -5, B, false, t, c);
-        check(v.score == 71 && v.worst == GAP_LONG, "gap long " + v.score);
+        check(v.score == 96 && v.worst == GAP_LONG, "gap long " + v.score);
         v = judge(".-", ".-", d(60, 180), d(60), 90, -5, B, false, t, c);
         check(v.score == 71 && v.worst == GAP_SHORT && v.notes.size() == 1, "gap short " + v.score);
         v = judge(".-", ".-", d(67, 200), d(67), 350, -5, B, false, f, c);

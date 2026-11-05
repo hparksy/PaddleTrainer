@@ -1213,6 +1213,7 @@ private:
         QSettings st(settingsPath(), QSettings::IniFormat);
         for (auto &f : fields())
             if (f.m) crit.*f.m = st.value(QString("criteria/") + f.key, crit.*f.m).toDouble();
+        if (crit.longOk == 50 && crit.longZero == 150) { crit.longOk = 100; crit.longZero = 300; }  // saved pre-1.5.1 defaults
         sanitize(crit);
         mode->setCurrentIndex(st.value("ui/mode", mode->currentIndex()).toInt());
         for (auto [key, sb] : uiBoxes()) sb->setValue(st.value(QString("ui/") + key, sb->value()).toInt());
@@ -1636,6 +1637,7 @@ private:
         if (retry->isChecked()) {
             owe = qMin(owe + 1, int(crit.maxRepeat));
             game->owe = owe;
+            prevCharEnd = -1;  // the pause before a repeat is reading the screen, not spacing
             report(want, QString("%1  ·  ↻ 같은 글자 %2회 더").arg(why).arg(owe), c, v);
         } else {
             report(want, why + "  ·  → 다음 글자", c, v);
@@ -1705,6 +1707,7 @@ private:
             failed(want, QString("%1점  ·  통과 %2 미만").arg(v.score).arg(crit.passScore), c, v);
             return;
         }
+        if (owe > 0) prevCharEnd = -1;  // still repeating, or checking that the repeats are over: gap not graded
         if (owe > 0 && --owe > 0) {  // earlier misses: repeat the same letter until paid off
             game->owe = owe;
             report(want, QString("%1 %2  ·  ✔ 통과  ·  ↻ 같은 글자 %3회 더").arg(gradeName(v.score)).arg(v.score).arg(owe), c, v);

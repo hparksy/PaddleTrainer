@@ -116,7 +116,7 @@ int main() {
     v = judge(".-", ".-", {60, 180}, {120}, -1, -5, B, false, t);    // a dit of hesitation before the dah
     CHECK(v.score == 33 && v.worst == ElemHesitate);
     v = judge(".-", ".-", {60, 180}, {60}, 400, -5, B, false, t);    // hesitation before the char
-    CHECK(v.score == 71 && v.worst == GapLong);
+    CHECK(v.score == 96 && v.worst == GapLong);
     v = judge(".-", ".-", {60, 180}, {60}, 90, -5, B, false, t);     // half the gap: letters run together
     CHECK(v.score == 71 && v.worst == GapShort && v.notes.size() == 1);
     v = judge(".-", ".-", {67, 200}, {67}, 350, -5, B, false, f);    // Farnsworth: between 3 dits (200) and 621 is fine

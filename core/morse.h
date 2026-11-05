@@ -141,7 +141,7 @@ struct Criteria {
     double hesitateOk = 30, hesitateZero = 100;  // iambic: extra silence between elements, % of a dit
     double releaseOk = 50, releaseZero = 100;    // iambic: release after the last tone, % of a dit
     double shortOk = 25, shortZero = 60;         // character gap too short (letters run together)
-    double longOk = 50, longZero = 150;          // character gap too long (hesitation)
+    double longOk = 100, longZero = 300;         // character gap too long (hesitation)
     double alertWindow = 10, alertCount = 4;     // warn when one habit shows up alertCount times in the last alertWindow tries
     // Exam, after the old Korean amateur telegraphy practical (plain English, N chars/min for 3 min) and its
     // sending score sheet: 오자·탈자·용자 / 자호불명료 / 정정 / 기준속도미달 / 표준속도초과. The sheet's point values

@@ -144,7 +144,7 @@ final class Morse {
         public double hesitateOk = 30, hesitateZero = 100;
         public double releaseOk = 50, releaseZero = 100;
         public double shortOk = 25, shortZero = 60;
-        public double longOk = 50, longZero = 150;
+        public double longOk = 100, longZero = 300;
         public double alertWindow = 10, alertCount = 4;  // warn when one habit shows up alertCount times in the last alertWindow tries
         public double examPass = 60;
         public double examErr = 2, examUnclear = 1, examCorr = 1, examShort = 2, examOver = 5;

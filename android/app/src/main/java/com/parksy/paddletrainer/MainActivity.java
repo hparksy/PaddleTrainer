@@ -424,6 +424,7 @@ public class MainActivity extends Activity {
                 try { setCrit(crit, f.key, Double.parseDouble(p.getString("criteria/" + f.key, String.valueOf(getCrit(crit, f.key))))); }
                 catch (NumberFormatException ignored) {}
             }
+        if (crit.longOk == 50 && crit.longZero == 150) { crit.longOk = 100; crit.longZero = 300; }  // saved pre-1.5.1 defaults
         crit.sanitize();
         mode = p.getInt("ui/mode", mode); wpm = p.getInt("ui/wpm", wpm); eff = p.getInt("ui/eff", eff);
         freq = p.getInt("ui/freq", freq); vol = p.getInt("ui/vol", vol); level = p.getInt("ui/level", level);
@@ -895,6 +896,7 @@ public class MainActivity extends Activity {
         if (retry) {
             owe = Math.min(owe + 1, (int) crit.maxRepeat);
             game.owe = owe;
+            prevCharEnd = -1;  // the pause before a repeat is reading the screen, not spacing
             report(want, why + "  ·  ↻ 같은 글자 " + owe + "회 더", color, v);
         } else {
             report(want, why + "  ·  → 다음 글자", color, v);
@@ -964,6 +966,7 @@ public class MainActivity extends Activity {
             failed(want, v.score + "점  ·  통과 " + GameView.fmt(crit.passScore) + " 미만", c, v);
             return;
         }
+        if (owe > 0) prevCharEnd = -1;  // still repeating, or checking that the repeats are over: gap not graded
         if (owe > 0 && --owe > 0) {  // earlier misses: repeat the same letter until paid off
             game.owe = owe;
             report(want, Ui.gradeName(v.score) + " " + v.score + "  ·  ✔ 통과  ·  ↻ 같은 글자 " + owe + "회 더", c, v);
