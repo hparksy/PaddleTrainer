@@ -78,6 +78,11 @@ int main() {
     CHECK(repeatedHabit({HintUsed, HintUsed, HintUsed, HintUsed}, ac) == 0);
     CHECK(repeatedHabit({}, ac) == 0);
 
+    CHECK(letterWeight(0, 0, 0) == 4);                             // never practised
+    CHECK(letterWeight(20, 2000, 0) == 1);                         // perfect letter
+    CHECK(letterWeight(20, 2000, 1) == 3);                         // one late letter already comes up 3x as often
+    CHECK(letterWeight(20, 2000, 9) == 11);                        // fails capped, so other letters still appear
+
     Decoder d;
     d.ditMs = 60;
     d.spaceMs = 300;

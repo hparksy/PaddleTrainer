@@ -108,7 +108,8 @@ public class MainActivity extends Activity {
 
     // keyer / practice settings (desktop toolbar values)
     int mode = Morse.Keyer.IAMBIC_B, wpm = 18, eff = 10, freq = 600, vol = 50, level = 2;
-    boolean swap, hint;
+    boolean swap, hint, retry = true;  // retry: failed letters are repeated
+    int words = 1;  // words per round
     String focus = "";  // focus letters: practise only these (empty = Koch order)
     String device = ""; // output device "type:product name", empty = system default
     Morse.Criteria crit = new Morse.Criteria();
@@ -427,6 +428,8 @@ public class MainActivity extends Activity {
         mode = p.getInt("ui/mode", mode); wpm = p.getInt("ui/wpm", wpm); eff = p.getInt("ui/eff", eff);
         freq = p.getInt("ui/freq", freq); vol = p.getInt("ui/vol", vol); level = p.getInt("ui/level", level);
         swap = p.getBoolean("ui/swap", false); hint = p.getBoolean("ui/hint", false);
+        retry = p.getBoolean("ui/retry", true);
+        words = p.getInt("ui/words", words);
         focus = focusPool(p.getString("ui/focus", ""));
         device = p.getString("ui/device", "");
     }
@@ -435,7 +438,7 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor e = prefs().edit();
         for (Field f : FIELDS) if (f.key != null) e.putString("criteria/" + f.key, String.valueOf(getCrit(crit, f.key)));
         e.putInt("ui/mode", mode).putInt("ui/wpm", wpm).putInt("ui/eff", eff).putInt("ui/freq", freq).putInt("ui/vol", vol)
-                .putInt("ui/level", level).putBoolean("ui/swap", swap).putBoolean("ui/hint", hint).putString("ui/focus", focus).putString("ui/device", device).apply();
+                .putInt("ui/level", level).putInt("ui/words", words).putBoolean("ui/swap", swap).putBoolean("ui/hint", hint).putBoolean("ui/retry", retry).putString("ui/focus", focus).putString("ui/device", device).apply();
     }
 
     void openSettings() {
@@ -463,16 +466,20 @@ public class MainActivity extends Activity {
         final Object[][] ints = {{"글자 WPM", 5, 40, wpm, "Farnsworth: 글자는 이 속도로 칩니다"},
                 {"실효 WPM", 5, 40, eff, "글자·단어 사이 간격만 늘려 전체 속도를 이 값으로 맞춥니다"},
                 {"톤 (Hz)", 300, 1200, freq, ""}, {"볼륨 (%)", 0, 100, vol, ""},
-                {"연습 글자 수 (코흐 순서)", 2, KOCH.length(), level, "K M U R E S N A P T L W I . J Z = F O Y , V G 5 / Q 9 2 H 3 8 B ? 4 7 C 1 D 6 0 X"}};
+                {"연습 글자 수 (코흐 순서)", 2, KOCH.length(), level, "K M U R E S N A P T L W I . J Z = F O Y , V G 5 / Q 9 2 H 3 8 B ? 4 7 C 1 D 6 0 X"},
+                {"단어 수 (1~3)", 1, 3, words, "한 번에 칠 단어 수입니다. 단어 하나는 5글자입니다"}};
         final List<EditText> intBoxes = new ArrayList<>();
         for (Object[] r : ints) intBoxes.add(numberRow(form, (String) r[0], (String) r[4], String.valueOf(r[3]), "", false));
-        CheckBox swapBox = new CheckBox(this), hintBox = new CheckBox(this);
+        CheckBox swapBox = new CheckBox(this), hintBox = new CheckBox(this), retryBox = new CheckBox(this);
         swapBox.setText("좌우 반전 (dit ↔ dah)");
         swapBox.setChecked(swap);
         hintBox.setText("힌트 (점·선 모양 보기, 점수 감점)");
         hintBox.setChecked(hint);
         form.addView(swapBox);
+        retryBox.setText("틀리면 다시 치기 (끄면 다음 글자로 넘어감)");
+        retryBox.setChecked(retry);
         form.addView(hintBox);
+        form.addView(retryBox);
 
         final List<EditText> critBoxes = new ArrayList<>();
         for (Field f : FIELDS) {
@@ -491,9 +498,9 @@ public class MainActivity extends Activity {
         AlertDialog dlg = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("설정").setView(sv)
                 .setPositiveButton("저장", (d, w) -> {
-                    final int[] lo = {5, 5, 300, 0, 2}, hi = {40, 40, 1200, 100, KOCH.length()};
-                    final int[] v = new int[5];
-                    for (int i = 0; i < 5; ++i) v[i] = (int) Math.max(lo[i], Math.min(hi[i], parse(intBoxes.get(i), (int) ints[i][3])));
+                    final int[] lo = {5, 5, 300, 0, 2, 1}, hi = {40, 40, 1200, 100, KOCH.length(), 3};
+                    final int[] v = new int[6];
+                    for (int i = 0; i < 6; ++i) v[i] = (int) Math.max(lo[i], Math.min(hi[i], parse(intBoxes.get(i), (int) ints[i][3])));
                     final int o = outBox.getSelectedItemPosition();
                     final String newDevice = o == 0 ? "" : deviceKey(outs.get(o - 1));
                     if (!newDevice.equals(device)) {  // switch the sound to the chosen device now
@@ -503,16 +510,18 @@ public class MainActivity extends Activity {
                     }
                     mode = modeBox.getSelectedItemPosition();
                     wpm = v[0]; eff = Math.min(v[1], v[0]); freq = v[2]; vol = v[3];
-                    final boolean levelChanged = v[4] != level;
+                    final boolean levelChanged = v[4] != level || v[5] != words;
                     level = v[4];
+                    words = v[5];
                     swap = swapBox.isChecked();
                     hint = hintBox.isChecked();
+                    retry = retryBox.isChecked();
                     int k = 0;
                     for (Field f : FIELDS)
                         if (f.key != null) setCrit(crit, f.key, Math.max(f.lo, Math.min(f.hi, parse(critBoxes.get(k++), getCrit(crit, f.key)))));
                     crit.sanitize();
                     saveSettings();
-                    owe = Math.min(owe, (int) crit.maxRepeat);
+                    owe = retry ? Math.min(owe, (int) crit.maxRepeat) : 0;
                     game.owe = owe;
                     updateAlert();
                     apply();
@@ -589,7 +598,7 @@ public class MainActivity extends Activity {
         paddleView.swap = swap;
         paddleView.invalidate();
         keyerInfo.setText(MODES[mode] + " · 글자 " + wpm + " / 실효 " + eff + " WPM · 톤 " + freq + " Hz" + (hint ? " · 힌트" : "") +
-                (swap ? " · 좌우 반전" : "") + "   (⚙ 설정에서 변경)");
+                (swap ? " · 좌우 반전" : "") + (retry ? "" : " · 다시 치기 끔") + "   (⚙ 설정에서 변경)");
     }
 
     void paddle(int phys, boolean down) {
@@ -607,14 +616,18 @@ public class MainActivity extends Activity {
 
     char target() { return game.pos < game.word.length() ? game.word.charAt(game.pos) : 0; }
 
-    // recent average per character (last 20 tries): weak characters come up much more often
+    // last 20 tries per character: weak or failed characters come up much more often
     double weight(char ch) {
-        int n = 0;
+        int n = 0, fails = 0;
         double sum = 0;
         for (int i = store.recs.size() - 1; i >= 0 && n < 20; --i)
-            if (store.recs.get(i).ch == ch) { sum += store.recs.get(i).score; ++n; }
-        final double d = 1 - sum / Math.max(n, 1) / 100;
-        return n > 0 ? 1 + 12 * d * d : 4;  // never practised: extra weight
+            if (store.recs.get(i).ch == ch) {
+                final Store.Rec r = store.recs.get(i);
+                sum += r.score;
+                ++n;
+                if (!r.ok || r.score < crit.passScore || (r.habits & Morse.STRAY_PRESS) != 0) ++fails;
+            }
+        return Morse.letterWeight(n, sum, fails);
     }
 
     // focus letters (upper-cased, Koch letters only, no repeats); empty = normal Koch practice
@@ -651,7 +664,8 @@ public class MainActivity extends Activity {
         double total = 0;
         for (int i = 0; i < set.length(); ++i) total += w[i] = weight(set.charAt(i));
         StringBuilder word = new StringBuilder();
-        for (int k = 0; k < WORD_LEN; ++k) {
+        for (int k = 0; k < WORD_LEN * words; ++k) {
+            if (k > 0 && k % WORD_LEN == 0) word.append(' ');
             double r = rng.nextDouble() * total;
             int i = 0;
             while (i < set.length() - 1 && (r -= w[i]) > 0) ++i;
@@ -876,6 +890,31 @@ public class MainActivity extends Activity {
         if (h != 0) alert.setText("⚠ 반복되는 습관: " + Morse.habitName(h) + " — 최근 " + recent.size() + "회 중 " + n[0] + "회\n→ " + Morse.habitAdvice(h));
     }
 
+    // Failed letter: repeat it, or with retry off show the result and move on.
+    void failed(char want, String why, int color, Morse.Verdict v) {
+        if (retry) {
+            owe = Math.min(owe + 1, (int) crit.maxRepeat);
+            game.owe = owe;
+            report(want, why + "  ·  ↻ 같은 글자 " + owe + "회 더", color, v);
+        } else {
+            report(want, why + "  ·  → 다음 글자", color, v);
+            nextLetter(color);
+        }
+    }
+    void nextLetter(int color) {
+        game.doneColor.add(color);
+        if (++game.pos < game.word.length() && game.word.charAt(game.pos) == ' ') {  // next word: the space is not keyed, its gap not graded
+            game.doneColor.add(color);
+            ++game.pos;
+            prevCharEnd = -1;
+        }
+        if (game.pos == game.word.length()) {
+            game.score += 100;
+            game.pop("WORD CLEAR! +100", Color.rgb(255, 215, 90));
+            ui.postDelayed(this::newWord, 900);
+        }
+    }
+
     void judge(String sent) {
         final char want = target();
         if (want == 0) { cur.clear(); return; }  // keyed during the word-clear pause
@@ -907,10 +946,8 @@ public class MainActivity extends Activity {
         if (!sent.equals(ref)) {
             game.combo = 0;
             prevCharEnd = -1;
-            owe = Math.min(owe + 1, (int) crit.maxRepeat);
-            game.owe = owe;
             final Character got = Morse.TABLE.get(sent);
-            report(want, "MISS '" + (got == null ? '?' : got) + "'  ·  ↻ 같은 글자 " + owe + "회 더", Ui.RED, v);
+            failed(want, "MISS '" + (got == null ? '?' : got) + "'", Ui.RED, v);
             return;  // typing-tutor style: retry the same letter
         }
         prevCharEnd = last.get(last.size() - 1).t1;
@@ -920,15 +957,11 @@ public class MainActivity extends Activity {
         game.bestCombo = Math.max(game.bestCombo, game.combo);
         game.score += Math.round(v.score * (1 + game.combo / 10.0));
         if (stray) {  // right letter, but a paddle was pressed that never sounded: the hand motion failed
-            owe = Math.min(owe + 1, (int) crit.maxRepeat);
-            game.owe = owe;
-            report(want, "헛누름  ·  소리 안 난 패들 누름  ·  ↻ 같은 글자 " + owe + "회 더", Ui.RED, v);
+            failed(want, "헛누름  ·  소리 안 난 패들 누름", Ui.RED, v);
             return;
         }
         if (v.score < crit.passScore) {  // right letter, rhythm under the pass mark: counts as a miss too
-            owe = Math.min(owe + 1, (int) crit.maxRepeat);
-            game.owe = owe;
-            report(want, v.score + "점  ·  통과 " + GameView.fmt(crit.passScore) + " 미만  ·  ↻ 같은 글자 " + owe + "회 더", c, v);
+            failed(want, v.score + "점  ·  통과 " + GameView.fmt(crit.passScore) + " 미만", c, v);
             return;
         }
         if (owe > 0 && --owe > 0) {  // earlier misses: repeat the same letter until paid off
@@ -938,11 +971,6 @@ public class MainActivity extends Activity {
         }
         game.owe = 0;
         report(want, Ui.gradeName(v.score) + " " + v.score + "  ·  ✔ 통과 → 다음 글자", c, v);
-        game.doneColor.add(c);
-        if (++game.pos == game.word.length()) {
-            game.score += 100;
-            game.pop("WORD CLEAR! +100", Color.rgb(255, 215, 90));
-            ui.postDelayed(this::newWord, 900);
-        }
+        nextLetter(c);
     }
 }

@@ -88,6 +88,11 @@ public class MorseTest {
         check(repeatedHabit(Arrays.asList(HINT_USED, HINT_USED, HINT_USED, HINT_USED), ac, null) == 0, "alert hint ignored");
         check(repeatedHabit(new ArrayList<>(), ac, null) == 0, "alert empty");
 
+        check(letterWeight(0, 0, 0) == 4, "weight never practised");
+        check(letterWeight(20, 2000, 0) == 1, "weight perfect");
+        check(letterWeight(20, 2000, 1) == 3, "weight one fail");
+        check(letterWeight(20, 2000, 9) == 11, "weight fails capped");
+
         Decoder dec = new Decoder();
         dec.ditMs = 60; dec.spaceMs = 300;
         dec.element(60, '.'); dec.element(180, '-');

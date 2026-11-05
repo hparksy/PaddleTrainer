@@ -49,6 +49,7 @@ final class Tone implements Runnable {
             for (String pattern : chars) {
                 for (char c : pattern.toCharArray()) { d.add((c == '.' ? 1 : 3) * keyer.dit); d.add(-keyer.dit); }
                 if (!d.isEmpty()) d.set(d.size() - 1, -(int) (charGapMs * rate / 1000));
+                if (pattern.isEmpty()) d.add(-(int) (charGapMs * 4 / 3 * rate / 1000));  // word space: 7 units instead of 3
             }
             demo = new int[d.size()];
             for (int i = 0; i < demo.length; ++i) demo[i] = d.get(i);

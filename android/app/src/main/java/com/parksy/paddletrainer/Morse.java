@@ -276,6 +276,14 @@ final class Morse {
         v.notes.add(0, habitName(STRAY_PRESS) + " — dit 패들 " + ditStrays + "회, dah 패들 " + dahStrays + "회 (소리는 안 났지만 손동작 실패)");
     }
 
+    // How often a letter comes up, from its last tries; fails = wrong, under the pass mark, or a stray press.
+    // Average 95 -> 1.0, 85 -> 1.3, 70 -> 2.1, 50 -> 4, 0 -> 13 (squared so weak ones stand out), plus 2 per recent fail (5 at most).
+    static double letterWeight(int tries, double scoreSum, int fails) {
+        if (tries == 0) return 4;  // never practised: extra weight
+        final double d = 1 - scoreSum / tries / 100;
+        return 1 + 12 * d * d + 2 * Math.min(fails, 5);
+    }
+
     // The habit that keeps coming back: most frequent in the last alertWindow attempts (newest last), if it showed up
     // at least alertCount times; 0 = nothing repeating. Specific habits win ties over "wrong letter"; the hint is ignored.
     static int repeatedHabit(List<Integer> recent, Criteria c, int[] count) {

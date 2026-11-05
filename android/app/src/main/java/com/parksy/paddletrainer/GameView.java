@@ -67,6 +67,7 @@ final class GameView extends View {
         final int len = Math.max(1, word.length());
         final float cell = Math.min(72, (W - 16) / len), y0 = 54, x0 = (W - cell * word.length()) / 2;
         for (int i = 0; i < word.length(); ++i) {
+            if (word.charAt(i) == ' ') continue;
             final RectF r = new RectF(x0 + i * cell + 4, y0, x0 + (i + 1) * cell - 4, y0 + cell);
             Ui.round(c, r, 10, i == pos ? Color.argb(170, 40, 80, 130) : Color.rgb(30, 32, 50));
             if (i == pos) Ui.outline(c, r, 10, owe > 0 ? Ui.ORANGE : Ui.CYAN, 3);

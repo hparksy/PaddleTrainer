@@ -273,6 +273,14 @@ inline void markStrays(Verdict &v, int ditStrays, int dahStrays) {
                                         "회, dah 패들 " + std::to_string(dahStrays) + "회 (소리는 안 났지만 손동작 실패)");
 }
 
+// How often a letter comes up, from its last tries; fails = wrong, under the pass mark, or a stray press.
+// Average 95 -> 1.0, 85 -> 1.3, 70 -> 2.1, 50 -> 4, 0 -> 13 (squared so weak ones stand out), plus 2 per recent fail (5 at most).
+inline double letterWeight(int tries, double scoreSum, int fails) {
+    if (!tries) return 4;  // never practised: extra weight
+    const double d = 1 - scoreSum / tries / 100;
+    return 1 + 12 * d * d + 2 * std::min(fails, 5);
+}
+
 // The habit that keeps coming back: most frequent in the last alertWindow attempts (habit flags, newest last),
 // if it showed up at least alertCount times; 0 = nothing repeating. Specific habits win ties over "wrong letter";
 // using the hint is a choice, not a habit.

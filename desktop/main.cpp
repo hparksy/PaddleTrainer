@@ -72,6 +72,7 @@ public:
         for (auto &pattern : chars) {
             for (char c : pattern) demo << (c == '.' ? 1 : 3) * keyer.dit << -keyer.dit;
             if (!demo.isEmpty()) demo.last() = -int(charGapMs * rate / 1000);
+            if (pattern.empty()) demo << -int(charGapMs * 4 / 3 * rate / 1000);  // word space: 7 units instead of 3
         }
         demoPos = 0;
         demoLeft = demo.isEmpty() ? 0 : demo[0];
@@ -340,14 +341,15 @@ protected:
                    QString("평균 %1점   ✔%2  ✘%3").arg(attempts ? qRound(scoreSum / attempts) : 0).arg(hits).arg(attempts - hits));
 
         // target word, typing-tutor style
-        const int cell = 86, y0 = 56, x0 = (W - cell * word.size()) / 2;
+        const int cell = qMin(86, (W - 20) / qMax(1, int(word.size()))), y0 = 56, x0 = (W - cell * word.size()) / 2;
         const QColor repeat(255, 150, 60);
         for (int i = 0; i < word.size(); ++i) {
+            if (word[i] == ' ') continue;
             const QRect r(x0 + i * cell + 6, y0, cell - 12, 86);
             p.setPen(i == pos ? QPen(owe ? repeat : QColor(90, 210, 255), 3) : Qt::NoPen);
             p.setBrush(i == pos ? QColor(40, 80, 130, 170) : QColor(30, 32, 50));
             p.drawRoundedRect(r, 12, 12);
-            setFont(40);
+            setFont(qMin(40, cell / 2));
             p.setPen(i < pos ? doneColor.value(i) : i == pos ? Qt::white : QColor(85, 90, 110));
             p.drawText(r, Qt::AlignCenter, word.mid(i, 1));
         }
@@ -361,7 +363,7 @@ protected:
             for (char c : pat) { const int bw = c == '.' ? 10 : 30; p.drawRoundedRect(QRectF(x, y0 + 96, bw, 9), 4, 4); x += bw + 6; }
         }
         if (owe && pos < word.size()) {  // this letter must be repeated before moving on
-            const QRectF badge(x0 + pos * cell + cell / 2.0 - 90, y0 + 104, 180, 24);
+            const QRectF badge(qBound(4.0, x0 + pos * cell + cell / 2.0 - 90, W - 184.0), y0 + 104, 180, 24);
             p.setPen(Qt::NoPen);
             p.setBrush(repeat);
             p.drawRoundedRect(badge, 12, 12);
@@ -887,12 +889,16 @@ public:
         span->setRange(1, 15); span->setValue(4);
         add("모드", mode); add("글자 WPM", wpm); add("실효 WPM", eff); add("톤", freq); add("볼륨", vol);
         add("글자 수", level);
+        wordCount->setRange(1, 3); wordCount->setValue(1);
+        wordCount->setToolTip("한 번에 칠 단어 수입니다. 단어 하나는 5글자입니다");
+        add("단어 수", wordCount);
         focusEdit->setPlaceholderText("예: R");
         focusEdit->setMaximumWidth(80);
         focusEdit->setToolTip("이 글자만 반복 연습합니다 (여러 글자도 됨, 예: RK). 비우면 코흐 순서로 돌아갑니다");
         add("집중 글자", focusEdit);
         add("표시 초", span);
-        bar->addWidget(swap); bar->addWidget(hint);
+        bar->addWidget(swap); bar->addWidget(hint); bar->addWidget(retry);
+        retry->setToolTip("틀리거나 점수가 통과 점수보다 낮은 글자를 다시 칩니다. 끄면 결과만 보여 주고 다음 글자로 넘어갑니다");
         auto *listen = new QPushButton("▶ 글자");
         auto *listenWord = new QPushButton("▶ 단어");
         auto *skip = new QPushButton("새 단어");
@@ -986,7 +992,8 @@ public:
         for (auto *sb : {wpm, eff, freq, span}) connect(sb, qOverload<int>(&QSpinBox::valueChanged), this, &App::apply);
         connect(vol, &QSlider::valueChanged, this, &App::apply);
         connect(hint, &QCheckBox::toggled, this, &App::apply);
-        connect(level, qOverload<int>(&QSpinBox::valueChanged), this, &App::newWord);
+        connect(retry, &QCheckBox::toggled, this, [this] { owe = game->owe = 0; game->update(); });
+        for (auto *sb : {level, wordCount}) connect(sb, qOverload<int>(&QSpinBox::valueChanged), this, &App::newWord);
         connect(focusEdit, &QLineEdit::textEdited, this, [this] { focusEdit->setText(focusPool()); newWord(); });
         connect(listen, &QPushButton::clicked, this, [this] { listenTo(false); });
         connect(listenWord, &QPushButton::clicked, this, [this] { listenTo(true); });
@@ -1070,9 +1077,9 @@ private:
     QListWidget *fixList = new QListWidget;  // feedback per judged character, newest on top
     QLabel *alertLabel = new QLabel;          // repeated bad habit warning above the list (hidden when none)
     QComboBox *mode = new QComboBox;
-    QSpinBox *wpm = new QSpinBox, *eff = new QSpinBox, *freq = new QSpinBox, *level = new QSpinBox, *span = new QSpinBox;
+    QSpinBox *wpm = new QSpinBox, *eff = new QSpinBox, *freq = new QSpinBox, *level = new QSpinBox, *wordCount = new QSpinBox, *span = new QSpinBox;
     QSlider *vol = new QSlider(Qt::Horizontal);
-    QCheckBox *swap = new QCheckBox("좌우 반전"), *hint = new QCheckBox("힌트");
+    QCheckBox *swap = new QCheckBox("좌우 반전"), *hint = new QCheckBox("힌트"), *retry = new QCheckBox("틀리면 다시 치기");
     QLineEdit *focusEdit = new QLineEdit;  // focus letters: practise only these (empty = Koch order)
     QComboBox *kindBox = new QComboBox;
     // exam
@@ -1200,7 +1207,7 @@ private:
         for (auto [ok, zero] : pairs) c.*zero = std::max(c.*zero, c.*ok + 5);
     }
     std::vector<std::pair<const char *, QSpinBox *>> uiBoxes() const {
-        return {{"wpm", wpm}, {"eff", eff}, {"freq", freq}, {"level", level}, {"span", span}};
+        return {{"wpm", wpm}, {"eff", eff}, {"freq", freq}, {"level", level}, {"words", wordCount}, {"span", span}};
     }
     void loadSettings() {
         QSettings st(settingsPath(), QSettings::IniFormat);
@@ -1213,6 +1220,7 @@ private:
         swap->setChecked(st.value("ui/swap", false).toBool());
         tone.deviceId = st.value("ui/device").toString();
         hint->setChecked(st.value("ui/hint", false).toBool());
+        retry->setChecked(st.value("ui/retry", true).toBool());
         focusEdit->setText(st.value("ui/focus").toString());
     }
     void saveSettings() {
@@ -1225,6 +1233,7 @@ private:
         st.setValue("ui/swap", swap->isChecked());
         st.setValue("ui/device", tone.deviceId);
         st.setValue("ui/hint", hint->isChecked());
+        st.setValue("ui/retry", retry->isChecked());
         st.setValue("ui/focus", focusPool());
     }
     void closeEvent(QCloseEvent *e) override { saveSettings(); QWidget::closeEvent(e); }
@@ -1350,15 +1359,17 @@ private:
         tone.play(chars, timing.charGapMs);
     }
 
-    // recent average per character (last 20 tries): weak characters come up much more often
-    // avg 95 -> 1.0, 85 -> 1.3, 70 -> 2.1, 50 -> 4, 0 -> 13 (squared so weak ones stand out)
+    // last 20 tries per character: weak or failed characters come up much more often
     double weight(char ch) const {
-        int n = 0;
+        int n = 0, fails = 0;
         double sum = 0;
         for (int i = recs.size() - 1; i >= 0 && n < 20; --i)
-            if (recs[i].ch == ch) { sum += recs[i].score; ++n; }
-        const double d = 1 - sum / qMax(n, 1) / 100;
-        return n ? 1 + 12 * d * d : 4;  // never practised: extra weight
+            if (recs[i].ch == ch) {
+                sum += recs[i].score;
+                ++n;
+                fails += !recs[i].ok || recs[i].score < crit.passScore || (recs[i].habits & StrayPress);
+            }
+        return letterWeight(n, sum, fails);
     }
 
     // focus letters typed by the user (upper-cased, Koch letters only, no repeats); empty = normal Koch practice
@@ -1377,7 +1388,8 @@ private:
         double total = 0;
         for (int i = 0; i < set.size(); ++i) total += w[i] = weight(set[i].toLatin1());
         game->word.clear();
-        for (int k = 0; k < WORD_LEN; ++k) {
+        for (int k = 0; k < WORD_LEN * wordCount->value(); ++k) {
+            if (k && k % WORD_LEN == 0) game->word += ' ';
             double r = QRandomGenerator::global()->bounded(total);
             int i = 0;
             while (i < set.size() - 1 && (r -= w[i]) > 0) ++i;
@@ -1619,6 +1631,31 @@ private:
                                        .arg(habitName(h)).arg(recent.size()).arg(n).arg(habitAdvice(h)));
     }
 
+    // Failed letter: repeat it, or with retry off show the result and move on.
+    void failed(char want, const QString &why, QColor c, const Verdict &v) {
+        if (retry->isChecked()) {
+            owe = qMin(owe + 1, int(crit.maxRepeat));
+            game->owe = owe;
+            report(want, QString("%1  ·  ↻ 같은 글자 %2회 더").arg(why).arg(owe), c, v);
+        } else {
+            report(want, why + "  ·  → 다음 글자", c, v);
+            nextLetter(c);
+        }
+    }
+    void nextLetter(QColor c) {
+        game->doneColor.push_back(c);
+        if (++game->pos < game->word.size() && game->word[game->pos] == ' ') {  // next word: the space is not keyed, its gap not graded
+            game->doneColor.push_back(c);
+            ++game->pos;
+            prevCharEnd = -1;
+        }
+        if (game->pos == game->word.size()) {
+            game->score += 100;
+            game->pop("WORD CLEAR! +100", QColor(255, 215, 90));
+            QTimer::singleShot(900, this, &App::newWord);
+        }
+    }
+
     void judge(const std::string &sent) {
         const char want = target();
         if (!want) { cur.clear(); return; }  // keyed during the word-clear pause
@@ -1650,11 +1687,8 @@ private:
         if (sent != ref) {
             game->combo = 0;
             prevCharEnd = -1;
-            owe = qMin(owe + 1, int(crit.maxRepeat));
             const auto it = morseTable().find(sent);
-            game->owe = owe;
-            report(want, QString("MISS '%1'  ·  ↻ 같은 글자 %2회 더").arg(it == morseTable().end() ? QChar('?') : QChar(it->second)).arg(owe),
-                   QColor(255, 80, 90), v);
+            failed(want, QString("MISS '%1'").arg(it == morseTable().end() ? QChar('?') : QChar(it->second)), QColor(255, 80, 90), v);
             return;  // typing-tutor style: retry the same letter
         }
         prevCharEnd = last.last().t1;
@@ -1664,15 +1698,11 @@ private:
         game->bestCombo = qMax(game->bestCombo, game->combo);
         game->score += qRound(v.score * (1 + game->combo / 10.0));
         if (stray) {  // right letter, but a paddle was pressed that never sounded: the hand motion failed
-            owe = qMin(owe + 1, int(crit.maxRepeat));
-            game->owe = owe;
-            report(want, QString("헛누름  ·  소리 안 난 패들 누름  ·  ↻ 같은 글자 %1회 더").arg(owe), QColor(255, 80, 90), v);
+            failed(want, "헛누름  ·  소리 안 난 패들 누름", QColor(255, 80, 90), v);
             return;
         }
         if (v.score < crit.passScore) {  // right letter, rhythm under the pass mark: counts as a miss too
-            owe = qMin(owe + 1, int(crit.maxRepeat));
-            game->owe = owe;
-            report(want, QString("%1점  ·  통과 %2 미만  ·  ↻ 같은 글자 %3회 더").arg(v.score).arg(crit.passScore).arg(owe), c, v);
+            failed(want, QString("%1점  ·  통과 %2 미만").arg(v.score).arg(crit.passScore), c, v);
             return;
         }
         if (owe > 0 && --owe > 0) {  // earlier misses: repeat the same letter until paid off
@@ -1682,12 +1712,7 @@ private:
         }
         game->owe = 0;
         report(want, QString("%1 %2  ·  ✔ 통과 → 다음 글자").arg(gradeName(v.score)).arg(v.score), c, v);
-        game->doneColor.push_back(c);
-        if (++game->pos == game->word.size()) {
-            game->score += 100;
-            game->pop("WORD CLEAR! +100", QColor(255, 215, 90));
-            QTimer::singleShot(900, this, &App::newWord);
-        }
+        nextLetter(c);
     }
 };
 
