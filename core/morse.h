@@ -6,6 +6,15 @@
 #include <string>
 #include <vector>
 
+// Letter orders of published courses. All hold the same 41 characters; prosigns other than <BT> (=) are left out.
+inline const char *const ORDER_NAMES[] = {"CW Academy", "LICW", "G4FON Koch", "LCWO"};
+inline const char *const ORDERS[] = {
+    "AENTSIO14DHLR25CUMW36?FY,GPQ79/BVJK08=XZ.",  // CWops CW Academy Beginner 4.7, sessions 1-10
+    "REATINPSGLCDHOFUWBKMY59,QXV73?=16.ZJ/2840",  // Long Island CW Club Beginners Carousel 1-2
+    "KMRSUAPTLOWI.NJEF0Y,VG5/Q9ZH38B?427C1D6X=",  // G4FON Koch trainer; '=' is not in it, so it comes last
+    "KMURESNAPTLWI.JZ=FOY,VG5/Q92H38B?47C1D60X"   // Learn CW Online
+};
+
 // Iambic keyer, advanced one audio sample at a time so element timing is sample-exact.
 struct Keyer {
     enum Mode { IambicB, IambicA, Straight };

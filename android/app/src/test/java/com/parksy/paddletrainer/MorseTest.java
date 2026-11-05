@@ -88,6 +88,14 @@ public class MorseTest {
         check(repeatedHabit(Arrays.asList(HINT_USED, HINT_USED, HINT_USED, HINT_USED), ac, null) == 0, "alert hint ignored");
         check(repeatedHabit(new ArrayList<>(), ac, null) == 0, "alert empty");
 
+        for (String o : ORDERS) {  // every order holds the same letters once each
+            char[] a = o.toCharArray(), b = ORDERS[0].toCharArray();
+            Arrays.sort(a);
+            Arrays.sort(b);
+            boolean once = true;
+            for (int i = 1; i < a.length; ++i) once &= a[i] != a[i - 1];
+            check(Arrays.equals(a, b) && a.length == 41 && once, "order " + o);
+        }
         check(letterWeight(0, 0, 0) == 4, "weight never practised");
         check(letterWeight(20, 2000, 0) == 1, "weight perfect");
         check(letterWeight(20, 2000, 1) == 3, "weight one fail");

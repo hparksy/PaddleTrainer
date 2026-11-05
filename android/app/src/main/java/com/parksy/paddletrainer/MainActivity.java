@@ -41,7 +41,6 @@ import java.util.Random;
 // Paddles: a USB adapter sending '[' ']' (OTG), or the on-screen paddle at the bottom.
 public class MainActivity extends Activity {
     static final int WORD_LEN = 5;
-    static final String KOCH = Morse.KOCH;
 
     // Exam grades: name, letters per minute, letters drawn from the learned Koch set (5-letter groups) or plain English.
     static final String[] GRADE_NAMES = {"배운 글자 5자 그룹 · 1분간 20자", "영문 보통어 · 1분간 20자 (연습)",
@@ -110,6 +109,7 @@ public class MainActivity extends Activity {
     int mode = Morse.Keyer.IAMBIC_B, wpm = 18, eff = 10, freq = 600, vol = 50, level = 2;
     boolean swap, hint, retry = true;  // retry: failed letters are repeated
     int words = 1;  // words per round
+    int letterOrder = 0;  // index into Morse.ORDERS
     String focus = "";  // focus letters: practise only these (empty = Koch order)
     String device = ""; // output device "type:product name", empty = system default
     Morse.Criteria crit = new Morse.Criteria();
@@ -431,6 +431,7 @@ public class MainActivity extends Activity {
         swap = p.getBoolean("ui/swap", false); hint = p.getBoolean("ui/hint", false);
         retry = p.getBoolean("ui/retry", true);
         words = p.getInt("ui/words", words);
+        letterOrder = Math.max(0, Math.min(Morse.ORDERS.length - 1, p.getInt("ui/order", letterOrder)));
         focus = focusPool(p.getString("ui/focus", ""));
         device = p.getString("ui/device", "");
     }
@@ -439,7 +440,7 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor e = prefs().edit();
         for (Field f : FIELDS) if (f.key != null) e.putString("criteria/" + f.key, String.valueOf(getCrit(crit, f.key)));
         e.putInt("ui/mode", mode).putInt("ui/wpm", wpm).putInt("ui/eff", eff).putInt("ui/freq", freq).putInt("ui/vol", vol)
-                .putInt("ui/level", level).putInt("ui/words", words).putBoolean("ui/swap", swap).putBoolean("ui/hint", hint).putBoolean("ui/retry", retry).putString("ui/focus", focus).putString("ui/device", device).apply();
+                .putInt("ui/level", level).putInt("ui/words", words).putInt("ui/order", letterOrder).putBoolean("ui/swap", swap).putBoolean("ui/hint", hint).putBoolean("ui/retry", retry).putString("ui/focus", focus).putString("ui/device", device).apply();
     }
 
     void openSettings() {
@@ -464,10 +465,16 @@ public class MainActivity extends Activity {
         Spinner modeBox = spinner(MODES);
         modeBox.setSelection(mode);
         form.addView(modeBox);
+        TextView orderLabel = label(11, Color.rgb(136, 144, 168));
+        orderLabel.setText("글자 순서: 앞에서부터 '연습 글자 수'만큼 연습합니다");
+        form.addView(orderLabel);
+        Spinner orderBox = spinner(Morse.ORDER_NAMES);
+        orderBox.setSelection(letterOrder);
+        form.addView(orderBox);
         final Object[][] ints = {{"글자 WPM", 5, 40, wpm, "Farnsworth: 글자는 이 속도로 칩니다"},
                 {"실효 WPM", 5, 40, eff, "글자·단어 사이 간격만 늘려 전체 속도를 이 값으로 맞춥니다"},
                 {"톤 (Hz)", 300, 1200, freq, ""}, {"볼륨 (%)", 0, 100, vol, ""},
-                {"연습 글자 수 (코흐 순서)", 2, KOCH.length(), level, "K M U R E S N A P T L W I . J Z = F O Y , V G 5 / Q 9 2 H 3 8 B ? 4 7 C 1 D 6 0 X"},
+                {"연습 글자 수", 2, order().length(), level, "위에서 고른 순서의 앞에서부터 쓸 글자 수입니다"},
                 {"단어 수 (1~3)", 1, 3, words, "한 번에 칠 단어 수입니다. 단어 하나는 5글자입니다"}};
         final List<EditText> intBoxes = new ArrayList<>();
         for (Object[] r : ints) intBoxes.add(numberRow(form, (String) r[0], (String) r[4], String.valueOf(r[3]), "", false));
@@ -499,7 +506,7 @@ public class MainActivity extends Activity {
         AlertDialog dlg = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("설정").setView(sv)
                 .setPositiveButton("저장", (d, w) -> {
-                    final int[] lo = {5, 5, 300, 0, 2, 1}, hi = {40, 40, 1200, 100, KOCH.length(), 3};
+                    final int[] lo = {5, 5, 300, 0, 2, 1}, hi = {40, 40, 1200, 100, order().length(), 3};
                     final int[] v = new int[6];
                     for (int i = 0; i < 6; ++i) v[i] = (int) Math.max(lo[i], Math.min(hi[i], parse(intBoxes.get(i), (int) ints[i][3])));
                     final int o = outBox.getSelectedItemPosition();
@@ -511,7 +518,8 @@ public class MainActivity extends Activity {
                     }
                     mode = modeBox.getSelectedItemPosition();
                     wpm = v[0]; eff = Math.min(v[1], v[0]); freq = v[2]; vol = v[3];
-                    final boolean levelChanged = v[4] != level || v[5] != words;
+                    final boolean levelChanged = v[4] != level || v[5] != words || orderBox.getSelectedItemPosition() != letterOrder;
+                    letterOrder = orderBox.getSelectedItemPosition();
                     level = v[4];
                     words = v[5];
                     swap = swapBox.isChecked();
@@ -631,11 +639,13 @@ public class MainActivity extends Activity {
         return Morse.letterWeight(n, sum, fails);
     }
 
+    String order() { return Morse.ORDERS[letterOrder]; }
+
     // focus letters (upper-cased, Koch letters only, no repeats); empty = normal Koch practice
     static String focusPool(String text) {
         StringBuilder pool = new StringBuilder();
         for (char c : text.toUpperCase(java.util.Locale.ROOT).toCharArray())
-            if (KOCH.indexOf(c) >= 0 && pool.indexOf(String.valueOf(c)) < 0) pool.append(c);
+            if (Morse.ORDERS[0].indexOf(c) >= 0 && pool.indexOf(String.valueOf(c)) < 0) pool.append(c);
         return pool.toString();
     }
 
@@ -650,7 +660,7 @@ public class MainActivity extends Activity {
         box.addView(e);
         new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("🎯 집중 연습")
-                .setMessage("이 글자만 반복해서 연습합니다. 해제하면 코흐 순서로 돌아갑니다.")
+                .setMessage("이 글자만 반복해서 연습합니다. 해제하면 기본 순서로 돌아갑니다.")
                 .setView(box)
                 .setPositiveButton("적용", (d, w) -> { focus = focusPool(e.getText().toString()); saveSettings(); newWord(); })
                 .setNeutralButton("해제", (d, w) -> { focus = ""; saveSettings(); newWord(); })
@@ -660,7 +670,7 @@ public class MainActivity extends Activity {
 
     void newWord() {
         final int n = level;
-        final String set = focus.isEmpty() ? KOCH.substring(0, n) : focus;
+        final String set = focus.isEmpty() ? order().substring(0, n) : focus;
         final double[] w = new double[set.length()];
         double total = 0;
         for (int i = 0; i < set.length(); ++i) total += w[i] = weight(set.charAt(i));
@@ -683,20 +693,20 @@ public class MainActivity extends Activity {
 
     void newWordStatus() {
         final int n = level;
-        stats.koch = KOCH.substring(0, n);
+        stats.koch = order().substring(0, n);
         // level-up rule: every practised character averages levelAvg+ over its last levelCount tries
         boolean ready = true;
         for (int i = 0; i < n && ready; ++i) {
             int cnt = 0;
             double sum = 0;
             for (int j = store.recs.size() - 1; j >= 0 && cnt < crit.levelCount; --j)
-                if (store.recs.get(j).ch == KOCH.charAt(i)) { sum += store.recs.get(j).score; ++cnt; }
+                if (store.recs.get(j).ch == order().charAt(i)) { sum += store.recs.get(j).score; ++cnt; }
             ready = cnt >= crit.levelCount && sum / cnt >= crit.levelAvg;
         }
-        final String next = ready && n < KOCH.length() ? "  ·  ★ 다음 글자 '" + KOCH.charAt(n) + "' 추가 권장 (⚙ 설정 → 연습 글자 수)"
+        final String next = ready && n < order().length() ? "  ·  ★ 다음 글자 '" + order().charAt(n) + "' 추가 권장 (⚙ 설정 → 연습 글자 수)"
                 : "  ·  글자 추가 기준: 모든 글자 최근 " + GameView.fmt(crit.levelCount) + "회 평균 " + GameView.fmt(crit.levelAvg) + "점";
         final String head = focus.isEmpty() ? "연습 글자: " + stats.koch + next
-                : "🎯 집중 연습: " + focus + "  ·  '🎯 집중' → 해제하면 코흐 순서(" + stats.koch + ")로 돌아갑니다";
+                : "🎯 집중 연습: " + focus + "  ·  '🎯 집중' → 해제하면 기본 순서(" + stats.koch + ")로 돌아갑니다";
         tint(focusBtn, focus.isEmpty() ? Color.rgb(51, 85, 221) : Ui.ORANGE);
         focusBtn.setText(focus.isEmpty() ? "🎯 집중" : "🎯 " + focus);
         status.setText(head + "\nUSB 패들 [ ] 키 (어댑터 모드 2, OTG) 또는 아래 화면 패들  ·  " + audioInfo + "  ·  v" + version());
@@ -771,7 +781,7 @@ public class MainActivity extends Activity {
                     if (g > 0) sentence.append(' ');
                     for (int k = 0; k < 5; ++k) {
                         char ch;
-                        do ch = KOCH.charAt(rng.nextInt(level)); while (ch == ',');  // ',' would break the CSV record
+                        do ch = order().charAt(rng.nextInt(level)); while (ch == ',');  // ',' would break the CSV record
                         sentence.append(ch);
                     }
                 }

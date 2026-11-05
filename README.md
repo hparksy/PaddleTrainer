@@ -3,7 +3,7 @@
 모스 부호 패들(전건) 연습 앱입니다. Windows PC와 Android에서 동작합니다.
 
 - **키어:** Iambic A/B, 스트레이트 키 (사이드톤 포함, 저지연 오디오)
-- **연습:** 코흐(Koch) 순서로 글자를 늘려 갑니다. 글자마다 리듬을 채점하고, 고칠 점과 교정 방법을 알려 줍니다.
+- **연습:** CW Academy, LICW, G4FON Koch, LCWO 중 고른 순서로 글자를 늘려 갑니다. 글자마다 리듬을 채점하고, 고칠 점과 교정 방법을 알려 줍니다.
   - 채점 기준: ITU-R M.1677 간격, Pierpont 「The Art & Skill of Radio-Telegraphy」, W8RIT 「Iambic Sending」
   - 최근에 틀렸거나 리듬이 늦었던 글자가 더 자주 나옵니다.
   - 한 번에 칠 단어 수를 1~3개에서 고릅니다.
